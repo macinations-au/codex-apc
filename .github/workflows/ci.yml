@@ -33,7 +33,11 @@ jobs:
 
       - name: Build (debug)
         working-directory: codex-acp
-        run: cargo build --locked
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: true
+        run: |
+          rustc --version
+          cargo build
 
       - name: Format check
         working-directory: codex-acp
@@ -45,5 +49,6 @@ jobs:
 
       - name: Test
         working-directory: codex-acp
-        run: cargo test --all --locked
-
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: true
+        run: cargo test --all

@@ -38,7 +38,11 @@ jobs:
 
       - name: Build (release)
         working-directory: codex-acp
-        run: cargo build --release --locked
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: true
+        run: |
+          rustc --version
+          cargo build --release
 
       - name: Compute platform identifiers
         id: plat
