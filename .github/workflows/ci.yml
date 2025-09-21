@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    name: Build, Lint, Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.89.0
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            codex-acp -> target
+
+      - name: Build (debug)
+        working-directory: codex-acp
+        run: cargo build --locked
+
+      - name: Format check
+        working-directory: codex-acp
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        working-directory: codex-acp
+        run: cargo clippy -- -D warnings
+
+      - name: Test
+        working-directory: codex-acp
+        run: cargo test --all --locked
+
