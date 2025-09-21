@@ -15,7 +15,7 @@ Install
 -------
 
 - One‑liner from GitHub:
-  - `bash <(curl -fsSL https://raw.githubusercontent.com/macinations-au/codex-apc/main/scripts/install.sh) --repo macinations-au/codex-apc`
+  - `bash <(curl -fsSL https://raw.githubusercontent.com/macinations-au/codex-apc/main/scripts/install.sh)`
 - Or install from source: `cargo install --path codex-acp`
 - Or build locally and run the script wrapper: `cd codex-acp && make release && ../scripts/codex-acp.sh`
 
