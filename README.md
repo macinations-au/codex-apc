@@ -5,7 +5,7 @@ codex-apc
 [![Rust Edition 2024](https://img.shields.io/badge/Edition-2024-blueviolet.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
 ![CI](https://img.shields.io/github/actions/workflow/status/macinations-au/codex-apc/ci.yml?label=CI)
 
-An Agent Client Protocol (ACP) agent that bridges the OpenAI Codex runtime to ACP‑capable clients (e.g., Zed). On session start it prints a Markdown banner with the application version and status. A minimal set of double‑slash commands is built in, and custom prompts are discovered and exposed as commands automatically.
+An Agent Client Protocol (ACP) agent that bridges the OpenAI Codex runtime to ACP‑capable clients (e.g., Zed). On session start it prints a Markdown banner with the application version and status. A minimal set of custom slash commands is built in, and custom prompts are discovered and exposed as commands automatically.
 
 <img width="2414" height="1354" alt="Untitled" src="https://github.com/user-attachments/assets/40199fd6-eebd-41b0-a73b-eb6bbfa6d406" />
 
@@ -51,14 +51,13 @@ Example (two entries: repo launcher and the installed binary):
 Slash Commands (built‑ins)
 --------------------------
 
-- `//status` — Markdown status (workspace, account, model, tokens)
-- `//init` — create an AGENTS.md template in the workspace
-- `//model <slug>` — set session model
-- `//approvals <policy>` — `untrusted | on-request | on-failure | never`
-- `//thoughts on|off` — show/hide reasoning stream (default: off)
+- `/status` — Markdown status (workspace, account, model, tokens)
+- `/init` — create an AGENTS.md template in the workspace
+- `/model <slug>` — set session model
+- `/approvals <policy>` — `untrusted | on-request | on-failure | never`
+- `/thoughts on|off` — show/hide reasoning stream (default: off)
 
 Notes
-- Double‑slash and single‑slash are both accepted (e.g., `//status` or `/status`).
 - Custom prompts under your Codex prompts directory are auto‑discovered and exposed as additional commands.
 
 CI
