@@ -3,79 +3,76 @@ codex-apc
 
 [![MSRV 1.89+](https://img.shields.io/badge/MSRV-1.89%2B-blue.svg)](codex-acp/rust-toolchain.toml)
 [![Rust Edition 2024](https://img.shields.io/badge/Edition-2024-blueviolet.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
-<!-- Update the CI badge after pushing to GitHub: replace ORG/REPO -->
 ![CI](https://img.shields.io/github/actions/workflow/status/macinations-au/codex-apc/ci.yml?label=CI)
 
-Agent Client Protocol (ACP) agent that bridges the OpenAI Codex runtime to ACP‑capable clients such as Zed. This repo contains:
+An Agent Client Protocol (ACP) agent that bridges the OpenAI Codex runtime to ACP‑capable clients (e.g., Zed). On session start it prints a Markdown banner with the application version and status. A minimal set of double‑slash commands is built in, and custom prompts are discovered and exposed as commands automatically.
 
-- `codex-acp/` — the Rust ACP agent (primary deliverable)
-- `scripts/` — helper scripts for running the agent from a built binary
+Contents
+- `codex-acp/` — Rust ACP agent (primary deliverable)
+- `scripts/` — helper scripts (`install.sh`, `codex-acp.sh`)
 
 Install
 -------
 
-- One‑liner from GitHub:
+- One‑liner (defaults to this repo; installs the latest GitHub Release):
   - `bash <(curl -fsSL https://raw.githubusercontent.com/macinations-au/codex-apc/main/scripts/install.sh)`
-- Or install from source: `cargo install --path codex-acp`
-- Or build locally and run the script wrapper: `cd codex-acp && make release && ../scripts/codex-acp.sh`
+- From source (local build):
+  - `cargo install --path codex-acp --force`
 
-Quick Start
------------
+Run
+---
 
-- Prereqs: Rust 1.89+ (pinned in `codex-acp/rust-toolchain.toml`).
-- Build:
-  - `cd codex-acp && make build` (or `make release` for optimized)
-- Run a quick stdio smoke test:
-  - `cd codex-acp && make smoke`
-- Run the agent binary (stdio JSON‑RPC):
+- Recommended launcher (keeps installed binary in lockstep with the freshest local build):
   - `./scripts/codex-acp.sh`
+  - The script syncs `~/.cargo/bin/codex-acp` to the newest repo build on each run.
 
 Zed Integration
 ---------------
 
-Add to your Zed settings:
+Example (two entries: repo launcher and the installed binary):
 
 ```json
 "agent_servers": {
   "Codex": {
-    "command": "codex-acp",
-    "args": [],
+    "command": "/Users/<you>/workspace/codex-apc/scripts/codex-acp.sh",
+    "env": { "RUST_LOG": "info" }
+  },
+  "CodexExec": {
+    "command": "/Users/<you>/.cargo/bin/codex-acp",
     "env": { "RUST_LOG": "info" }
   }
 }
 ```
 
-Ensure `codex-acp` is on your `PATH` (e.g., `cargo install --path codex-acp`), or point Zed at `scripts/codex-acp.sh`.
+Slash Commands (built‑ins)
+--------------------------
 
-Screenshots
------------
-<img width="2418" height="1202" alt="image" src="https://github.com/user-attachments/assets/1bac602e-4a33-49e8-b779-9fe3d86d6e53" />
+- `//status` — Markdown status (workspace, account, model, tokens)
+- `//init` — create an AGENTS.md template in the workspace
+- `//model <slug>` — set session model
+- `//approvals <policy>` — `untrusted | on-request | on-failure | never`
+- `//thoughts on|off` — show/hide reasoning stream (default: off)
 
-```
-docs/zed-integration.png
-```
-
+Notes
+- Double‑slash and single‑slash are both accepted (e.g., `//status` or `/status`).
+- Custom prompts under your Codex prompts directory are auto‑discovered and exposed as additional commands.
 
 CI
 --
 
-GitHub Actions builds on Linux and macOS, checking format, clippy (`-D warnings`), and tests. See `.github/workflows/ci.yml`.
-
-Development
------------
-
-Useful commands in `codex-acp/Makefile`:
-- `make build`, `make release`
-- `make fmt`, `make clippy`, `make check`, `make test`
-
-See `codex-acp/README.md` for details, including `/status` and other slash commands.
+GitHub Actions builds on Linux and macOS, runs `fmt`, Clippy (`-D warnings`), and tests. See `.github/workflows/ci.yml`.
 
 Releases
 --------
 
-- Tag a release: `git tag -a v0.1.0 -m "v0.1.0" && git push --tags`.
-- CI auto-builds release artifacts on tags (Linux x86_64, macOS x86_64 + arm64) and publishes a GitHub Release with tarballs and SHA256SUMS.
-- Artifacts contain: `codex-acp` binary, `README.md`, `README-codex-acp.md`, and `LICENSE`.
+- Tag to release: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push --tags`
+- CI builds platform tarballs and publishes a GitHub Release with SHA256SUMS.
+
+Development
+-----------
+
+- `cd codex-acp && make build | make release`
+- `make fmt && make clippy && make test`
 
 License
 -------
