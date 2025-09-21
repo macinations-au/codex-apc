@@ -14,6 +14,14 @@ impl CodexAgent {
                 meta: None,
             },
             AvailableCommand {
+                name: "thoughts".into(),
+                description: "toggle reasoning stream for this session".into(),
+                input: Some(AvailableCommandInput::Unstructured {
+                    hint: "on|off".into(),
+                }),
+                meta: None,
+            },
+            AvailableCommand {
                 name: "model".into(),
                 description: "choose what model and reasoning effort to use".into(),
                 input: Some(AvailableCommandInput::Unstructured {
@@ -92,6 +100,17 @@ Coding Conventions
 - Match the existing code style and structure; avoid wholesale refactors.
 - Don't add licenses or headers unless requested.
 
+Formatting (Markdown)
+- Always respond in valid Markdown.
+- Use headings (## ...), short bullet lists, and fenced code blocks with language tags (```bash, ```json, ```rust, etc.).
+- Do not mix prose and code on the same line; put code in fenced blocks only.
+- Keep answers concise and actionable; avoid preambles and meta commentary.
+- For long answers, include a short Summary section at the end.
+
+Reasoning / "Thinking"
+- Do not output chain-of-thought by default. Provide final answers and brief bullet rationales only.
+- Prefer succinct explanations; avoid step-by-step internal reasoning unless explicitly requested.
+
 Workflow
 - How to run and test: describe commands (e.g., `cargo test`, `npm test`).
 - Any environment variables or secrets required for local runs.
@@ -132,6 +151,40 @@ Notes for Agents
                 self.send_message_chunk(session_id, msg.into(), tx)?;
                 let _ = rx.await;
                 return Ok(true);
+            }
+            "thoughts" => {
+                let arg = _rest.trim().to_lowercase();
+                let desired = match arg.as_str() {
+                    "on" => Some(true),
+                    "off" => Some(false),
+                    _ => None,
+                };
+
+                if let Some(v) = desired {
+                    if let Ok(mut map) = self.sessions.try_borrow_mut()
+                        && let Some(state) = map.get_mut(&sid_str)
+                    {
+                        state.show_reasoning = v;
+                    }
+                    let msg = if v {
+                        "Reasoning stream: `on`"
+                    } else {
+                        "Reasoning stream: `off` (thinking minimized)"
+                    };
+                    let (tx, rx) = oneshot::channel();
+                    self.send_message_chunk(session_id, msg.into(), tx)?;
+                    let _ = rx.await;
+                    return Ok(true);
+                } else {
+                    let (tx, rx) = oneshot::channel();
+                    self.send_message_chunk(
+                        session_id,
+                        "Usage: //thoughts on|off".into(),
+                        tx,
+                    )?;
+                    let _ = rx.await;
+                    return Ok(true);
+                }
             }
             "status" => {
                 let status_text = self.render_status(&sid_str).await;
@@ -323,7 +376,7 @@ Notes for Agents
         Ok(false)
     }
 
-    async fn render_status(&self, sid_str: &str) -> String {
+    pub(crate) async fn render_status(&self, sid_str: &str) -> String {
         // Session snapshot
         let (approval_mode, sandbox_mode, token_usage, session_uuid) = {
             let map = self.sessions.borrow();
@@ -385,8 +438,13 @@ Notes for Agents
         // Model
         let model = &self.config.model;
         let provider = self.title_case(&self.config.model_provider_id);
-        let effort = format!("{}", self.config.model_reasoning_effort);
-        let summary = format!("{}", self.config.model_reasoning_summary);
+        let effort = format!("{:?}", self.config.model_reasoning_effort);
+        let summary = format!("{:?}", self.config.model_reasoning_summary);
+
+        let reasoning_on = {
+            let map = self.sessions.borrow();
+            map.get(sid_str).map(|s| s.show_reasoning).unwrap_or(false)
+        };
 
         // Tokens
         let (input, output, total) = match token_usage {
@@ -394,8 +452,30 @@ Notes for Agents
             None => (0, 0, 0),
         };
 
+        // Markdown output with headings and lists
         format!(
-            "📂 Workspace\n  • Path: {cwd}\n  • Approval Mode: {approval}\n  • Sandbox: {sandbox}\n  • AGENTS files: {agents}\n\n👤 Account\n  • Signed in with {auth_mode}\n  • Login: {email}\n  • Plan: {plan}\n\n🧠 Model\n  • Name: {model}\n  • Provider: {provider}\n  • Reasoning Effort: {effort}\n  • Reasoning Summaries: {summary}\n\n📊 Token Usage\n  • Session ID: {sid}\n  • Input: {input}\n  • Output: {output}\n  • Total: {total}",
+            concat!(
+                "## Workspace\n",
+                "- Path: `{cwd}`\n",
+                "- Approval Mode: `{approval}`\n",
+                "- Sandbox: `{sandbox}`\n",
+                "- AGENTS files: {agents}\n\n",
+                "## Account\n",
+                "- Signed in with: `{auth_mode}`\n",
+                "- Login: `{email}`\n",
+                "- Plan: `{plan}`\n\n",
+                "## Model\n",
+                "- Name: `{model}`\n",
+                "- Provider: `{provider}`\n",
+                "- Reasoning Effort: `{effort}`\n",
+                "- Reasoning Summaries: `{summary}`\n",
+                "- Reasoning Stream: `{reasoning}`\n\n",
+                "## Token Usage\n",
+                "- Session ID: `{sid}`\n",
+                "- Input: `{input}`\n",
+                "- Output: `{output}`\n",
+                "- Total: `{total}`\n"
+            ),
             cwd = cwd,
             approval = approval_mode,
             sandbox = sandbox_mode,
@@ -408,6 +488,7 @@ Notes for Agents
             effort = self.title_case(&effort),
             summary = self.title_case(&summary),
             sid = session_uuid,
+            reasoning = if reasoning_on { "on" } else { "off" },
             input = input,
             output = output,
             total = total,

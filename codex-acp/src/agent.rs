@@ -42,6 +42,7 @@ struct SessionState {
     current_approval: AskForApproval,
     current_sandbox: SandboxPolicy,
     token_usage: Option<TokenUsage>,
+    show_reasoning: bool,
 }
 
 pub struct CodexAgent {
@@ -245,8 +246,23 @@ impl Agent for CodexAgent {
                 current_approval: AskForApproval::OnRequest,
                 current_sandbox: SandboxPolicy::new_workspace_write_policy(),
                 token_usage: None,
+                show_reasoning: false,
             },
         );
+
+        // Immediately print status and version to the client in Markdown.
+        {
+            let sid_str = session_id.to_string();
+            let status = self.render_status(&sid_str).await;
+            let intro = format!(
+                "## Codex ACP\n- Version: `{}`\n\n{}",
+                env!("CARGO_PKG_VERSION"),
+                status
+            );
+            let (tx, rx) = oneshot::channel();
+            self.send_message_chunk(&SessionId(sid_str.clone().into()), intro.into(), tx)?;
+            let _ = rx.await;
+        }
 
         // Advertise available slash commands to the client right after
         // the session is created. Send it asynchronously to avoid racing
@@ -384,6 +400,7 @@ impl Agent for CodexAgent {
                     current_approval: AskForApproval::OnRequest,
                     current_sandbox: SandboxPolicy::new_workspace_write_policy(),
                     token_usage: None,
+                    show_reasoning: false,
                 },
             );
 
@@ -675,14 +692,30 @@ impl Agent for CodexAgent {
                     rx.await.map_err(Error::into_internal_error)?;
                 }
                 EventMsg::AgentReasoningDelta(delta) => {
-                    let (tx, rx) = oneshot::channel();
-                    self.send_message_chunk(&args.session_id, delta.delta.into(), tx)?;
-                    rx.await.map_err(Error::into_internal_error)?;
+                    let show = self
+                        .sessions
+                        .borrow()
+                        .get(&sid_str)
+                        .map(|s| s.show_reasoning)
+                        .unwrap_or(false);
+                    if show {
+                        let (tx, rx) = oneshot::channel();
+                        self.send_message_chunk(&args.session_id, delta.delta.into(), tx)?;
+                        rx.await.map_err(Error::into_internal_error)?;
+                    }
                 }
                 EventMsg::AgentReasoning(reason) => {
-                    let (tx, rx) = oneshot::channel();
-                    self.send_message_chunk(&args.session_id, reason.text.into(), tx)?;
-                    rx.await.map_err(Error::into_internal_error)?;
+                    let show = self
+                        .sessions
+                        .borrow()
+                        .get(&sid_str)
+                        .map(|s| s.show_reasoning)
+                        .unwrap_or(false);
+                    if show {
+                        let (tx, rx) = oneshot::channel();
+                        self.send_message_chunk(&args.session_id, reason.text.into(), tx)?;
+                        rx.await.map_err(Error::into_internal_error)?;
+                    }
                 }
                 // MCP tool calls → ACP ToolCall/ToolCallUpdate
                 EventMsg::McpToolCallBegin(begin) => {
