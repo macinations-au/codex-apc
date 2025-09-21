@@ -49,14 +49,12 @@ Ensure `codex-acp` is on your `PATH` (e.g., `cargo install --path codex-acp`), o
 
 Screenshots
 -----------
-
-Optionally add a screenshot of the agent in Zed:
+<img width="2418" height="1202" alt="image" src="https://github.com/user-attachments/assets/1bac602e-4a33-49e8-b779-9fe3d86d6e53" />
 
 ```
 docs/zed-integration.png
 ```
 
-Then reference it here once committed: `![Zed Integration](docs/zed-integration.png)`.
 
 CI
 --
