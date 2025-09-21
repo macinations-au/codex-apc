@@ -1,4 +1,4 @@
-zed-codex-apc
+codex-apc
 ================
 
 [![MSRV 1.89+](https://img.shields.io/badge/MSRV-1.89%2B-blue.svg)](codex-acp/rust-toolchain.toml)
