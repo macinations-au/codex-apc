@@ -8,7 +8,7 @@ set -euo pipefail
 #   bash <(curl -fsSL https://raw.githubusercontent.com/ORG/REPO/main/scripts/install.sh) --repo ORG/REPO
 #   bash scripts/install.sh --repo ORG/REPO --version v0.1.0 --bin-dir /usr/local/bin
 
-REPO="${REPO:-}"
+REPO="${REPO:-macinations-au/codex-apc}"
 VERSION="${VERSION:-latest}"
 BIN_DIR="${BIN_DIR:-}"
 DRY_RUN=0
@@ -35,10 +35,7 @@ EOF
   esac
 done
 
-if [[ -z "$REPO" ]]; then
-  echo "error: --repo ORG/REPO is required (or set REPO env)" >&2
-  exit 2
-fi
+# REPO can be overridden via --repo or REPO env; defaults to this repo.
 
 uname_s=$(uname -s | tr '[:upper:]' '[:lower:]')
 uname_m=$(uname -m)
@@ -124,4 +121,3 @@ fi
 
 echo "Installed $("$dest" --version 2>/dev/null || echo codex-acp)." >&2
 echo "Done." >&2
-
