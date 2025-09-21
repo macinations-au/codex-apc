@@ -7,6 +7,10 @@ codex-apc
 
 An Agent Client Protocol (ACP) agent that bridges the OpenAI Codex runtime to ACP‑capable clients (e.g., Zed). On session start it prints a Markdown banner with the application version and status. A minimal set of double‑slash commands is built in, and custom prompts are discovered and exposed as commands automatically.
 
+<img width="2414" height="1354" alt="Untitled" src="https://github.com/user-attachments/assets/40199fd6-eebd-41b0-a73b-eb6bbfa6d406" />
+
+
+
 Contents
 - `codex-acp/` — Rust ACP agent (primary deliverable)
 - `scripts/` — helper scripts (`install.sh`, `codex-acp.sh`)
