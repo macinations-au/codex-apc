@@ -24,43 +24,74 @@ Install
 - From source (local build):
   - `cargo install --path codex-agentic --force`
 
-Run
----
+Quick Start (Simple)
+--------------------
 
-- `codex-agentic` defaults to the CLI and supports `--acp` for ACP:
+- Install (one line):
 
 ```bash
-# CLI (upstream) mode
-codex-agentic [upstream-cli-args]
-
-# ACP mode (for IDEs)
-codex-agentic --acp
+bash <(curl -fsSL https://raw.githubusercontent.com/macinations-au/codex-apc/main/scripts/install.sh)
 ```
 
-Key features in this distribution
-- Single binary: CLI by default; pass `--acp` to run as an ACP server in IDEs.
-- Reasoning view control for both modes: `--reasoning hidden|summary|raw`.
-- CLI model picker shows local Ollama models; picks persist (provider+model).
-- No default heavy model is auto‑pulled in OSS mode.
+- Start chatting (default mode):
 
-Examples
-- Minimal CLI session
-  - `codex-agentic`
-  - Type `/model` → pick an OpenAI or Ollama model
-  - Type `/status` to confirm
+```bash
+codex-agentic
+```
 
-- Use Ollama models (no flags needed after first pick)
-  - `codex-agentic`
-  - `/model` → choose `qwq:latest`
-  - Provider switches to `oss` and the choice is saved; future runs reuse it
+- Use it inside an editor (ACP mode):
 
-- Collapse “thinking”
-  - `codex-agentic --reasoning summary`
-  - In the transcript, “Thinking” shows with a chevron (▶). Press `r` to expand/collapse.
+```bash
+codex-agentic acp
+```
 
-- ACP server for IDEs (e.g., Zed)
-  - `codex-agentic --acp --reasoning summary`
-  - In the IDE, use `/reasoning hidden|summary|raw` to change mid‑session
+That’s it. Think of “cli” as chat in your terminal and “acp” as the version your editor talks to.
+
+Two Ways To Use It (Like You’re 10)
+-----------------------------------
+
+- Talk in the Terminal (CLI)
+  - Run: `codex-agentic`
+  - Type your question. Use `/model` to pick a brain (OpenAI or local Ollama).
+  - Want to hide the “thinking”? Press `r` or start with `--reasoning summary`.
+
+- Talk in Your Editor (ACP)
+  - Run: `codex-agentic acp` (keep it running)
+  - Tell your editor to connect to it (Zed example below).
+
+Bonus: `codex-agentic` can also run all the normal “Codex CLI” commands. See “Using Upstream Commands” below.
+
+Everyday Examples
+-----------------
+
+- Pick a model and ask something
+
+```bash
+codex-agentic
+# then type in the UI:
+/model   # choose a model
+What is 17 * 23?
+```
+
+- Use a local model from Ollama
+
+```bash
+codex-agentic
+# then type:
+/model   # pick something like qwq:latest
+```
+
+- Make “thinking” shorter
+
+```bash
+codex-agentic --reasoning summary
+```
+
+- Run in ACP mode for your editor
+
+```bash
+codex-agentic acp --reasoning summary
+```
 
 Zed Integration
 ---------------
@@ -69,24 +100,109 @@ Example (two entries: repo launcher and the installed binary):
 
 ```json
 "agent_servers": {
-  "Codex": {
-    "command": "/Users/<you>/workspace/codex-apc/scripts/codex-agentic.sh",
-    "env": { "RUST_LOG": "info" }
-  },
-  "CodexExec": {
-    "command": "/Users/<you>/.cargo/bin/codex-agentic",
-    "env": { "RUST_LOG": "info" }
+  "CodexAgentic": {
+    "command": "codex-agentic",
+    "env": { "RUST_LOG": "info" },
+    "args": [
+      "--acp",
+      "--search"
+    ]
   }
 }
 ```
 
+Using Upstream Commands (The “cli” Bridge)
+-----------------------------------------
+
+codex-agentic includes the upstream Codex CLI. Use the `cli --` subcommand to pass commands straight through.
+
+```bash
+# Show the upstream help with all commands you’re expecting
+codex-agentic cli -- --help
+
+# Examples
+codex-agentic cli -- login
+codex-agentic cli -- logout
+codex-agentic cli -- exec -e 'echo hello'
+codex-agentic cli -- resume --last
+codex-agentic cli -- apply --help
+```
+
+Why two layers? Because this project adds ACP mode and extra tweaks, but we keep all the familiar Codex CLI features available under `cli --`.
+
+ACP Configuration Recipes (-c/--config)
+---------------------------------------
+
+You can set any config key with `-c key=value`. Values are parsed as JSON when possible, otherwise treated as strings. Repeat `-c` to set multiple keys.
+
+- Switch to local provider (Ollama) and pick a model
+
+```bash
+codex-agentic acp -c model_provider=\"oss\" -c model=\"qwq:latest\"
+```
+
+- Safer auto-exec in your workspace
+
+```bash
+codex-agentic acp -c ask_for_approval=\"on-failure\" -c sandbox_mode=\"workspace-write\"
+```
+
+- Make “thinking” concise and effort medium
+
+```bash
+codex-agentic acp -c model_reasoning_summary=\"concise\" -c model_reasoning_effort=\"medium\"
+```
+
+- Hide reasoning completely
+
+```bash
+codex-agentic acp -c model_reasoning_summary=\"none\" -c hide_agent_reasoning=true
+```
+
+- Set the working directory
+
+```bash
+codex-agentic acp -c cwd=\"/path/to/project\"
+```
+
+Hints
+- Strings need quotes if they contain special characters: `-c model=\"gpt-4o-mini\"`
+- Lists use JSON: `-c sandbox_permissions='["disk-full-read-access"]'`
+- Prefer first‑class flags when available: `--model`, `--oss`, `--profile`, `--cwd`, `--model-reasoning-effort`, etc.
+
+YOLO Mode With Search (Dangerous)
+---------------------------------
+
+One switch that makes the model run without asking, without a sandbox, and enables web search.
+
+```bash
+codex-agentic acp --yolo-with-search
+```
+
+What it sets under the hood
+- `ask_for_approval = "never"`
+- `sandbox_mode = "danger-full-access"`
+- `tools.web_search_request = true`
+
+Only use this in a throwaway or well‑isolated environment.
+
+
+
+
 Slash commands (high‑use)
 -------------------------
-- `/model` — open the model picker; includes local Ollama models; persists provider+model
+- `/model` — open the model picker; includes local Ollama models; saves model only (never provider)
 - `/status` — workspace/account/model/tokens
 - `/approvals <policy>` — `untrusted | on-request | on-failure | never`
 - `/reasoning <hidden|summary|raw>` — collapse or show “thinking”
 - `/init` — scaffold an AGENTS.md in the workspace
+
+Update & Version
+----------------
+
+- The TUI shows an “Update available” message when a newer release is out.
+- It links to this repo’s README (you’re here) and can show a one‑liner installer.
+- Versioning: we follow `0.39.0-apc.y` (our patch number is `y`).
 
 Notes
 - Custom prompts under your Codex prompts directory are auto‑discovered and appear as additional commands.

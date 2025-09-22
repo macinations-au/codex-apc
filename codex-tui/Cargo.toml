@@ -1,7 +1,7 @@
 [package]
 edition = "2024"
 name = "codex-tui"
-version = "0.0.0"
+version = "0.39.0-apc.0"
 
 [[bin]]
 name = "codex-tui"
@@ -13,7 +13,7 @@ path = "src/lib.rs"
 
 [features]
 # Enable vt100-based tests (emulator) when running with `--features vt100-tests`.
-vt100-tests = []
+vt100-tests = ["dep:vt100"]
 # Gate verbose debug logging inside the TUI implementation.
 debug-logs = []
 
@@ -101,4 +101,10 @@ chrono = { version = "0.4", features = ["serde"] }
 insta = "1.43.2"
 pretty_assertions = "1"
 rand = "0.9"
-vt100 = "0.16.2"
+
+# Keep vt100 available for test builds to avoid widespread cfg-gating in tests.
+vt100 = "0.15.2"
+
+[dependencies.vt100]
+version = "0.15.2"
+optional = true

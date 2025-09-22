@@ -1,8 +1,8 @@
 use clap::Parser;
+use clap::ValueEnum;
 use codex_common::ApprovalModeCliArg;
 use codex_common::CliConfigOverrides;
 use std::path::PathBuf;
-use clap::ValueEnum;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum ReasoningViewArg {
@@ -12,7 +12,7 @@ pub enum ReasoningViewArg {
 }
 
 #[derive(Parser, Debug)]
-#[command(version)]
+#[command(name = "codex-agentic", version)]
 pub struct Cli {
     /// Optional user prompt to start the session.
     #[arg(value_name = "PROMPT")]
@@ -22,8 +22,8 @@ pub struct Cli {
     #[arg(long = "image", short = 'i', value_name = "FILE", value_delimiter = ',', num_args = 1..)]
     pub images: Vec<PathBuf>,
 
-    // Internal controls set by the top-level `codex resume` subcommand.
-    // These are not exposed as user flags on the base `codex` command.
+    // Internal controls set by the top-level `codex-agentic resume` subcommand.
+    // These are not exposed as user flags on the base `codex-agentic` command.
     #[clap(skip)]
     pub resume_picker: bool,
 
@@ -31,7 +31,7 @@ pub struct Cli {
     pub resume_last: bool,
 
     /// Internal: resume a specific recorded session by id (UUID). Set by the
-    /// top-level `codex resume <SESSION_ID>` wrapper; not exposed as a public flag.
+    /// top-level `codex-agentic resume <SESSION_ID>` wrapper; not exposed as a public flag.
     #[clap(skip)]
     pub resume_session_id: Option<String>,
 
@@ -39,9 +39,8 @@ pub struct Cli {
     #[arg(long, short = 'm')]
     pub model: Option<String>,
 
-    /// Convenience flag to select the local open source model provider.
-    /// Equivalent to -c model_provider=oss; verifies a local Ollama server is
-    /// running.
+    /// Convenience flag to select the local open‑source provider (Ollama)
+    /// for this session only. Does not persist provider to config.
     #[arg(long = "oss", default_value_t = false)]
     pub oss: bool,
 

@@ -23,6 +23,7 @@ use codex_core::{
         AskForApproval, EventMsg, InputItem, Op, ReviewDecision, SandboxPolicy, Submission,
         TokenUsage,
     },
+    protocol_config_types::ReasoningEffort,
 };
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot, oneshot::Sender};
@@ -43,6 +44,8 @@ struct SessionState {
     current_sandbox: SandboxPolicy,
     token_usage: Option<TokenUsage>,
     show_reasoning: bool,
+    current_model: String,
+    current_effort: ReasoningEffort,
 }
 
 pub struct CodexAgent {
@@ -247,6 +250,8 @@ impl Agent for CodexAgent {
                 current_sandbox: SandboxPolicy::new_workspace_write_policy(),
                 token_usage: None,
                 show_reasoning: false,
+                current_model: self.config.model.clone(),
+                current_effort: self.config.model_reasoning_effort,
             },
         );
 
@@ -256,7 +261,10 @@ impl Agent for CodexAgent {
             let sid_str = session_id.to_string();
             let tx_updates = self.session_update_tx.clone();
             // Precompute strings before moving into the task to avoid borrowing self.
-            let intro_header = format!("## Codex ACP\n- Version: `{}`\n\n", env!("CARGO_PKG_VERSION"));
+            let intro_header = format!(
+                "## Codex ACP\n- Version: `{}`\n\n",
+                env!("CARGO_PKG_VERSION")
+            );
             let status_string = self.render_status(&sid_str).await;
             task::spawn_local(async move {
                 let intro = format!("{}{}", intro_header, status_string);
@@ -264,7 +272,9 @@ impl Agent for CodexAgent {
                 let _ = tx_updates.send((
                     SessionNotification {
                         session_id: SessionId(sid_str.into()),
-                        update: SessionUpdate::AgentMessageChunk { content: intro.into() },
+                        update: SessionUpdate::AgentMessageChunk {
+                            content: intro.into(),
+                        },
                         meta: None,
                     },
                     tx,
@@ -410,6 +420,8 @@ impl Agent for CodexAgent {
                     current_sandbox: SandboxPolicy::new_workspace_write_policy(),
                     token_usage: None,
                     show_reasoning: false,
+                    current_model: self.config.model.clone(),
+                    current_effort: self.config.model_reasoning_effort,
                 },
             );
 
@@ -525,7 +537,10 @@ impl Agent for CodexAgent {
             let sid = args.session_id.clone();
             let sid_str = sid.0.to_string();
             let tx_updates = self.session_update_tx.clone();
-            let intro_header = format!("## Codex ACP\n- Version: `{}`\n\n", env!("CARGO_PKG_VERSION"));
+            let intro_header = format!(
+                "## Codex ACP\n- Version: `{}`\n\n",
+                env!("CARGO_PKG_VERSION")
+            );
             let status_string = self.render_status(&sid_str).await;
             task::spawn_local(async move {
                 let intro = format!("{}{}", intro_header, status_string);
@@ -533,7 +548,9 @@ impl Agent for CodexAgent {
                 let _ = tx_updates.send((
                     SessionNotification {
                         session_id: sid,
-                        update: SessionUpdate::AgentMessageChunk { content: intro.into() },
+                        update: SessionUpdate::AgentMessageChunk {
+                            content: intro.into(),
+                        },
                         meta: None,
                     },
                     tx,
@@ -717,10 +734,9 @@ impl Agent for CodexAgent {
                     self.send_message_chunk(&args.session_id, delta.delta.into(), tx)?;
                     rx.await.map_err(Error::into_internal_error)?;
                 }
-                EventMsg::AgentMessage(msg) => {
-                    let (tx, rx) = oneshot::channel();
-                    self.send_message_chunk(&args.session_id, msg.message.into(), tx)?;
-                    rx.await.map_err(Error::into_internal_error)?;
+                EventMsg::AgentMessage(_msg) => {
+                    // Skip complete message since we're already sending deltas
+                    // This prevents duplicate text in the chat interface
                 }
                 EventMsg::AgentReasoningDelta(delta) => {
                     let show = self
@@ -735,18 +751,9 @@ impl Agent for CodexAgent {
                         rx.await.map_err(Error::into_internal_error)?;
                     }
                 }
-                EventMsg::AgentReasoning(reason) => {
-                    let show = self
-                        .sessions
-                        .borrow()
-                        .get(&sid_str)
-                        .map(|s| s.show_reasoning)
-                        .unwrap_or(false);
-                    if show {
-                        let (tx, rx) = oneshot::channel();
-                        self.send_message_chunk(&args.session_id, reason.text.into(), tx)?;
-                        rx.await.map_err(Error::into_internal_error)?;
-                    }
+                EventMsg::AgentReasoning(_reason) => {
+                    // Skip complete reasoning message since we're already sending deltas
+                    // This prevents duplicate text in the chat interface
                 }
                 // MCP tool calls → ACP ToolCall/ToolCallUpdate
                 EventMsg::McpToolCallBegin(begin) => {

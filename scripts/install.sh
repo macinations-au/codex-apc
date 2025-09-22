@@ -86,6 +86,14 @@ fi
 name_regex="${BIN_NAME}-${tag}-${os}-${arch}\\.tar\\.gz"
 asset_url=$(printf '%s' "$json" | awk -v re="$name_regex" -F '"' '$2=="browser_download_url" && $4 ~ re {print $4; exit}')
 
+# Fallback: artifact names may map 0.39.0-apc.0 → 0.39.0.0 and include a leading 'v'.
+if [[ -z "$asset_url" ]]; then
+  raw_tag="${tag#v}"
+  art_ver="${raw_tag/-apc./.}"
+  name_regex_alt="${BIN_NAME}-v${art_ver}-${os}-${arch}\\.tar\\.gz"
+  asset_url=$(printf '%s' "$json" | awk -v re="$name_regex_alt" -F '"' '$2=="browser_download_url" && $4 ~ re {print $4; exit}')
+fi
+
 if [[ -z "$asset_url" ]]; then
   echo "error: could not find asset matching ${name_regex}" >&2
   echo "available assets:" >&2

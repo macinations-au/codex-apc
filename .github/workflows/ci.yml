@@ -10,6 +10,12 @@ jobs:
   build:
     name: Build, Lint, Test
     runs-on: ${{ matrix.os }}
+    env:
+      # Ensure embedded TUI upgrade banner points to this repo's README and
+      # uses our install command when developers run locally under CI.
+      CODEX_AGENTIC_UPDATE_REPO: ${{ github.repository }}
+      CODEX_AGENTIC_UPGRADE_CMD: bash <(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh)
+      CODEX_UPGRADE_URL: https://github.com/${{ github.repository }}
     strategy:
       fail-fast: false
       matrix:

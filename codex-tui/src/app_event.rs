@@ -63,7 +63,6 @@ pub(crate) enum AppEvent {
     /// Persist reasoning view settings
     PersistReasoning(super::cli::ReasoningViewArg),
     // (Removed) PersistProviderSelection — provider is session-only now
-
     /// Update the current approval policy in the running app and widget.
     UpdateAskForApprovalPolicy(AskForApproval),
 

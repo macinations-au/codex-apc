@@ -15,11 +15,9 @@ use codex_core::config::ConfigToml;
 use codex_core::config::GPT_5_CODEX_MEDIUM_MODEL;
 use codex_core::config::find_codex_home;
 use codex_core::config::load_config_as_toml_with_cli_overrides;
-use codex_core::config::persist_model_selection;
 use codex_core::find_conversation_path_by_id_str;
 use codex_core::protocol::AskForApproval;
 use codex_core::protocol::SandboxPolicy;
-use codex_ollama::DEFAULT_OSS_MODEL;
 use codex_protocol::config_types::SandboxMode;
 use codex_protocol::mcp_protocol::AuthMode;
 use std::fs::OpenOptions;
@@ -105,23 +103,13 @@ pub async fn run_main(
         )
     };
 
-    // Model defaults
-    // - If explicitly provided, honor it.
-    // - In OSS mode without -m: do not force a default (avoid pulling a heavy model).
-    // - Otherwise (OpenAI providers) default to a broadly available model.
-    let model = if let Some(model) = &cli.model {
-        Some(model.clone())
-    } else if cli.oss {
-        None
-    } else {
-        Some("gpt-4o-mini".to_string())
-    };
+    // Model override - only set if explicitly provided via CLI
+    // This allows the config file's model to be used when no -m flag is provided
+    let model = cli.model.clone();
 
-    let model_provider_override = if cli.oss {
-        Some(BUILT_IN_OSS_MODEL_PROVIDER_ID.to_owned())
-    } else {
-        None
-    };
+    // Avoid setting provider via overrides; switch in-memory after load so it
+    // cannot be persisted by loaders. Provider is session-only.
+    let model_provider_override = None::<String>;
 
     // canonicalize the cwd
     let cwd = cli.cwd.clone().map(|p| p.canonicalize().unwrap_or(p));
@@ -141,7 +129,9 @@ pub async fn run_main(
         include_view_image_tool: None,
         show_raw_agent_reasoning: match cli.reasoning_view {
             Some(crate::cli::ReasoningViewArg::Raw) => Some(true),
-            Some(crate::cli::ReasoningViewArg::Hidden | crate::cli::ReasoningViewArg::Summary) => Some(false),
+            Some(crate::cli::ReasoningViewArg::Hidden | crate::cli::ReasoningViewArg::Summary) => {
+                Some(false)
+            }
             None => cli.oss.then_some(true),
         },
         tools_web_search_request: cli.web_search.then_some(true),
@@ -171,10 +161,23 @@ pub async fn run_main(
     };
 
     // Do not rely on persisted provider; treat provider as session-only.
+    // If user passed --oss, set provider to OSS in-memory now.
+    if cli.oss {
+        if let Some(p) = codex_core::built_in_model_providers()
+            .get(BUILT_IN_OSS_MODEL_PROVIDER_ID)
+            .cloned()
+        {
+            config.model_provider_id = BUILT_IN_OSS_MODEL_PROVIDER_ID.to_string();
+            config.model_provider = p;
+        }
+    }
     // If the config contains `model_provider = "oss"` but the user didn't
     // pass `--oss`, switch to OpenAI provider in-memory (no persistence).
     if !cli.oss && config.model_provider_id == codex_core::BUILT_IN_OSS_MODEL_PROVIDER_ID {
-        if let Some(p) = codex_core::built_in_model_providers().get("openai").cloned() {
+        if let Some(p) = codex_core::built_in_model_providers()
+            .get("openai")
+            .cloned()
+        {
             config.model_provider_id = "openai".to_string();
             config.model_provider = p;
         }
@@ -186,12 +189,14 @@ pub async fn run_main(
             crate::cli::ReasoningViewArg::Hidden => {
                 config.hide_agent_reasoning = true;
                 config.show_raw_agent_reasoning = false;
-                config.model_reasoning_summary = codex_protocol::config_types::ReasoningSummary::None;
+                config.model_reasoning_summary =
+                    codex_protocol::config_types::ReasoningSummary::None;
             }
             crate::cli::ReasoningViewArg::Summary => {
                 config.hide_agent_reasoning = false;
                 config.show_raw_agent_reasoning = false;
-                config.model_reasoning_summary = codex_protocol::config_types::ReasoningSummary::Concise;
+                config.model_reasoning_summary =
+                    codex_protocol::config_types::ReasoningSummary::Concise;
             }
             crate::cli::ReasoningViewArg::Raw => {
                 config.hide_agent_reasoning = false;
@@ -328,7 +333,20 @@ async fn run_ratatui_app(
             format!("{current_version} -> {latest_version}.").into(),
         ]));
 
-        if managed_by_npm {
+        // Allow downstream (codex-agentic) to fully override upgrade guidance.
+        if let Ok(cmd) = std::env::var("CODEX_UPGRADE_CMD") {
+            lines.push(Line::from(vec![
+                "Run ".into(),
+                cmd.cyan(),
+                " to update.".into(),
+            ]));
+        } else if let Ok(url) = std::env::var("CODEX_UPGRADE_URL") {
+            lines.push(Line::from(vec![
+                "See ".into(),
+                url.cyan(),
+                " for the latest releases and installation options.".into(),
+            ]));
+        } else if managed_by_npm {
             let npm_cmd = "npm install -g @openai/codex@latest";
             lines.push(Line::from(vec![
                 "Run ".into(),
@@ -432,7 +450,7 @@ async fn run_ratatui_app(
         if switch_to_new_model {
             config.model = GPT_5_CODEX_MEDIUM_MODEL.to_owned();
             config.model_reasoning_effort = None;
-            if let Err(e) = persist_model_selection(
+            if let Err(e) = crate::app::persist_model_without_provider(
                 &config.codex_home,
                 active_profile.as_deref(),
                 &config.model,
@@ -599,12 +617,21 @@ mod tests {
         codex_home.push(unique_suffix);
         std::fs::create_dir_all(&codex_home).expect("create unique CODEX_HOME");
 
-        Config::load_from_base_config_with_overrides(
+        let mut cfg = Config::load_from_base_config_with_overrides(
             ConfigToml::default(),
             ConfigOverrides::default(),
             codex_home,
         )
-        .expect("load default config")
+        .expect("load default config");
+
+        // Ensure tests default to an OpenAI-like provider that requires auth,
+        // so rollout prompt logic behaves deterministically.
+        if let Some(p) = codex_core::built_in_model_providers().get("openai").cloned() {
+            cfg.model_provider_id = "openai".to_string();
+            cfg.model_provider = p;
+        }
+
+        cfg
     }
 
     /// Test helper to write an `auth.json` with the requested auth mode into the
@@ -656,8 +683,16 @@ mod tests {
     #[test]
     fn hides_model_rollout_prompt_when_api_auth_mode() {
         let cli = Cli::parse_from(["codex"]);
-        let cfg = make_config();
+        let mut cfg = make_config();
         set_auth_method(&cfg.codex_home, AuthMode::ApiKey);
+        // Ensure provider does not require OpenAI auth to avoid showing the prompt.
+        if let Some(p) = codex_core::built_in_model_providers()
+            .get(BUILT_IN_OSS_MODEL_PROVIDER_ID)
+            .cloned()
+        {
+            cfg.model_provider_id = BUILT_IN_OSS_MODEL_PROVIDER_ID.to_string();
+            cfg.model_provider = p;
+        }
         assert!(!should_show_model_rollout_prompt(&cli, &cfg, None, false,));
     }
 

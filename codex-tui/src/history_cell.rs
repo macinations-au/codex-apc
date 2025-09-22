@@ -141,32 +141,45 @@ pub(crate) struct ReasoningSummaryCell {
 
 impl ReasoningSummaryCell {
     pub(crate) fn new(header: Vec<Line<'static>>, content: Vec<Line<'static>>) -> Self {
-        Self { header, content, collapsed: std::sync::atomic::AtomicBool::new(true) }
+        Self {
+            header,
+            content,
+            collapsed: std::sync::atomic::AtomicBool::new(true),
+        }
     }
 
     pub(crate) fn toggle(&self) {
         let cur = self.collapsed.load(std::sync::atomic::Ordering::Relaxed);
-        self.collapsed.store(!cur, std::sync::atomic::Ordering::Relaxed);
+        self.collapsed
+            .store(!cur, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
 impl HistoryCell for ReasoningSummaryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut out: Vec<Line<'static>> = Vec::new();
-        let chevron = if self.collapsed.load(std::sync::atomic::Ordering::Relaxed) {
-            "▶"
-        } else {
-            "▼"
-        };
-        let mut header_line = vec![chevron.magenta().bold(), " ".into()];
-        if self.header.is_empty() {
-            header_line.push("thinking".magenta().bold());
-        } else {
-            // Render header inline (already styled); fall back to plain text if multi-line
-            header_line.push("thinking".magenta().bold());
+        let collapsed = self
+            .collapsed
+            .load(std::sync::atomic::Ordering::Relaxed);
+
+        if collapsed {
+            // Collapsed view: show a single bullet line with the first summary line content.
+            if let Some(first) = self.content.iter().find(|l| !l.spans.is_empty()) {
+                let mut spans = Vec::with_capacity(first.spans.len() + 1);
+                spans.push("• ".into());
+                spans.extend(first.spans.clone());
+                out.push(Line::from(spans));
+                return out;
+            }
+            // Fallback if no summary content is available: minimal thinking header.
+            out.push(Line::from(vec!["• ".into(), "thinking".magenta().bold()]));
+            return out;
         }
+
+        // Expanded view: show a header line and the wrapped summary body.
+        let mut header_line = vec!["▼".magenta().bold(), " ".into(), "thinking".magenta().bold()];
         out.push(Line::from(header_line));
-        if !self.collapsed.load(std::sync::atomic::Ordering::Relaxed) {
+        {
             let summary_lines = self
                 .content
                 .iter()

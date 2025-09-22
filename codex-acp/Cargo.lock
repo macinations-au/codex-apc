@@ -539,17 +539,19 @@ dependencies = [
 
 [[package]]
 name = "codex-acp"
-version = "0.1.2"
+version = "0.39.0-apc.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
  "async-trait",
  "codex-cli",
  "codex-core",
+ "codex-ollama",
  "serde",
  "serde_json",
  "tokio",
  "tokio-util",
+ "toml 0.9.5",
  "tracing",
  "tracing-subscriber",
  "uuid",

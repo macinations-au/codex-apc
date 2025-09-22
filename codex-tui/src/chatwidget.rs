@@ -1388,29 +1388,29 @@ impl ChatWidget {
             let model_slug = preset.model.to_string();
             let effort = preset.effort;
             let current_model = current_model.clone();
-                    let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
-                        tx.send(AppEvent::CodexOp(Op::OverrideTurnContext {
-                            cwd: None,
-                            approval_policy: None,
-                            sandbox_policy: None,
-                            model: Some(model_slug.clone()),
-                            effort: Some(effort),
-                            summary: None,
-                        }));
-                        tx.send(AppEvent::UpdateModel(model_slug.clone()));
-                        tx.send(AppEvent::UpdateReasoningEffort(effort));
-                        tx.send(AppEvent::PersistModelSelection {
-                            model: model_slug.clone(),
-                            effort,
-                        });
-                        // Session-only provider switch to OpenAI; no persistence.
-                        tx.send(AppEvent::UpdateModelProvider("openai".to_string()));
-                        tx.send(AppEvent::NewSession);
-                        tracing::info!(
-                            "New model: {}, New effort: {}, Current model: {}, Current effort: {}",
-                            model_slug.clone(),
-                            effort
-                                .map(|effort| effort.to_string())
+            let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+                tx.send(AppEvent::CodexOp(Op::OverrideTurnContext {
+                    cwd: None,
+                    approval_policy: None,
+                    sandbox_policy: None,
+                    model: Some(model_slug.clone()),
+                    effort: Some(effort),
+                    summary: None,
+                }));
+                tx.send(AppEvent::UpdateModel(model_slug.clone()));
+                tx.send(AppEvent::UpdateReasoningEffort(effort));
+                tx.send(AppEvent::PersistModelSelection {
+                    model: model_slug.clone(),
+                    effort,
+                });
+                // Session-only provider switch to OpenAI; no persistence.
+                tx.send(AppEvent::UpdateModelProvider("openai".to_string()));
+                tx.send(AppEvent::NewSession);
+                tracing::info!(
+                    "New model: {}, New effort: {}, Current model: {}, Current effort: {}",
+                    model_slug.clone(),
+                    effort
+                        .map(|effort| effort.to_string())
                         .unwrap_or_else(|| "none".to_string()),
                     current_model,
                     current_effort
@@ -1434,7 +1434,9 @@ impl ChatWidget {
             let cfg = self.config.clone();
             let extra_models: Vec<String> = tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(async move {
-                    if let Ok(client) = codex_ollama::OllamaClient::try_from_oss_provider(&cfg).await {
+                    if let Ok(client) =
+                        codex_ollama::OllamaClient::try_from_oss_provider(&cfg).await
+                    {
                         if let Ok(list) = client.fetch_models().await {
                             return list;
                         }
@@ -1442,35 +1444,35 @@ impl ChatWidget {
                     Vec::new()
                 })
             });
-                for model_slug in extra_models.into_iter() {
-                    let name = format!("{}", model_slug);
-                    let is_current = current_model.as_str() == model_slug.as_str();
-                    let model_slug_cloned = model_slug.clone();
-                    let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
-                        tx.send(AppEvent::CodexOp(Op::OverrideTurnContext {
-                            cwd: None,
-                            approval_policy: None,
-                            sandbox_policy: None,
-                            model: Some(model_slug_cloned.clone()),
-                            effort: None,
-                            summary: None,
-                        }));
-                        tx.send(AppEvent::UpdateModel(model_slug_cloned.clone()));
-                        // Ensure provider is set to oss and persist both selection and provider.
-                        tx.send(AppEvent::UpdateModelProvider("oss".to_string()));
-                        tx.send(AppEvent::PersistModelSelection {
-                            model: model_slug_cloned.clone(),
-                            effort: None,
-                        });
-                        // Start a new session to ensure provider switch takes full effect.
-                        tx.send(AppEvent::NewSession);
-                    })];
-                    items.push(SelectionItem {
-                        name,
-                        description: Some("Local model (Ollama)".to_string()),
-                        is_current,
-                        actions,
+            for model_slug in extra_models.into_iter() {
+                let name = format!("{}", model_slug);
+                let is_current = current_model.as_str() == model_slug.as_str();
+                let model_slug_cloned = model_slug.clone();
+                let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+                    tx.send(AppEvent::CodexOp(Op::OverrideTurnContext {
+                        cwd: None,
+                        approval_policy: None,
+                        sandbox_policy: None,
+                        model: Some(model_slug_cloned.clone()),
+                        effort: None,
+                        summary: None,
+                    }));
+                    tx.send(AppEvent::UpdateModel(model_slug_cloned.clone()));
+                    // DO NOT send UpdateModelProvider for Ollama models
+                    // Modifying config.model_provider triggers unwanted persistence
+                    tx.send(AppEvent::PersistModelSelection {
+                        model: model_slug_cloned.clone(),
+                        effort: None,
                     });
+                    // Start a new session to ensure provider switch takes full effect.
+                    tx.send(AppEvent::NewSession);
+                })];
+                items.push(SelectionItem {
+                    name,
+                    description: Some("Local model (Ollama)".to_string()),
+                    is_current,
+                    actions,
+                });
             }
         }
 
@@ -1528,7 +1530,11 @@ impl ChatWidget {
         let current_hidden = self.config.hide_agent_reasoning;
         let current_raw = self.config.show_raw_agent_reasoning;
 
-        let add = |items: &mut Vec<SelectionItem>, label: &str, desc: &str, selected: bool, choice: crate::cli::ReasoningViewArg| {
+        let add = |items: &mut Vec<SelectionItem>,
+                   label: &str,
+                   desc: &str,
+                   selected: bool,
+                   choice: crate::cli::ReasoningViewArg| {
             let name = label.to_string();
             let description = Some(desc.to_string());
             let is_current = selected;
@@ -1536,12 +1542,35 @@ impl ChatWidget {
                 tx.send(AppEvent::UpdateReasoningView(choice));
                 tx.send(AppEvent::PersistReasoning(choice));
             })];
-            items.push(SelectionItem { name, description, is_current, actions });
+            items.push(SelectionItem {
+                name,
+                description,
+                is_current,
+                actions,
+            });
         };
 
-        add(&mut items, "Hidden", "don’t show thinking or summaries", current_hidden, crate::cli::ReasoningViewArg::Hidden);
-        add(&mut items, "Summary", "show concise summaries only", (!current_hidden && !current_raw), crate::cli::ReasoningViewArg::Summary);
-        add(&mut items, "Raw", "show raw thinking stream (when available)", current_raw, crate::cli::ReasoningViewArg::Raw);
+        add(
+            &mut items,
+            "Hidden",
+            "don’t show thinking or summaries",
+            current_hidden,
+            crate::cli::ReasoningViewArg::Hidden,
+        );
+        add(
+            &mut items,
+            "Summary",
+            "show concise summaries only",
+            !current_hidden && !current_raw,
+            crate::cli::ReasoningViewArg::Summary,
+        );
+        add(
+            &mut items,
+            "Raw",
+            "show raw thinking stream (when available)",
+            current_raw,
+            crate::cli::ReasoningViewArg::Raw,
+        );
 
         self.bottom_pane.show_selection_view(
             "Reasoning Display".to_string(),

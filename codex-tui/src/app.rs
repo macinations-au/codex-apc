@@ -12,7 +12,6 @@ use codex_ansi_escape::ansi_escape_line;
 use codex_core::AuthManager;
 use codex_core::ConversationManager;
 use codex_core::config::Config;
-use codex_core::config::persist_model_selection;
 // Build a minimal map for built-in providers we might need to switch to.
 fn built_in_provider_by_id(id: &str) -> Option<codex_core::ModelProviderInfo> {
     // Reuse built_ins via public function on config (aggregated set is public)
@@ -215,6 +214,23 @@ impl App {
         Ok(true)
     }
 
+    /// Helper to scrub provider keys from config files
+    fn spawn_provider_scrub(&self) {
+        let codex_home = self.config.codex_home.clone();
+        let profile = self.active_profile.clone();
+        let model = self.config.model.clone();
+        let effort = self.config.model_reasoning_effort;
+        tokio::spawn(async move {
+            let _ = persist_model_without_provider(
+                &codex_home,
+                profile.as_deref(),
+                &model,
+                effort,
+            )
+            .await;
+        });
+    }
+
     async fn handle_event(&mut self, tui: &mut tui::Tui, event: AppEvent) -> Result<bool> {
         match event {
             AppEvent::NewSession => {
@@ -229,6 +245,11 @@ impl App {
                 };
                 self.chat_widget = ChatWidget::new(init, self.server.clone());
                 tui.frame_requester().schedule_frame();
+                // After starting a new session, scrub provider keys once more
+                // to catch any late writes by other layers.
+                if self.config.model_provider_id == codex_core::BUILT_IN_OSS_MODEL_PROVIDER_ID {
+                    self.spawn_provider_scrub();
+                }
             }
             AppEvent::InsertHistoryCell(cell) => {
                 let cell: Arc<dyn HistoryCell> = cell.into();
@@ -320,19 +341,22 @@ impl App {
                     crate::cli::ReasoningViewArg::Hidden => {
                         self.config.hide_agent_reasoning = true;
                         self.config.show_raw_agent_reasoning = false;
-                        self.config.model_reasoning_summary = codex_protocol::config_types::ReasoningSummary::None;
+                        self.config.model_reasoning_summary =
+                            codex_protocol::config_types::ReasoningSummary::None;
                     }
                     crate::cli::ReasoningViewArg::Summary => {
                         self.config.hide_agent_reasoning = false;
                         self.config.show_raw_agent_reasoning = false;
-                        self.config.model_reasoning_summary = codex_protocol::config_types::ReasoningSummary::Concise;
+                        self.config.model_reasoning_summary =
+                            codex_protocol::config_types::ReasoningSummary::Concise;
                     }
                     crate::cli::ReasoningViewArg::Raw => {
                         self.config.hide_agent_reasoning = false;
                         self.config.show_raw_agent_reasoning = true;
                     }
                 }
-                self.chat_widget.add_info_message("Reasoning view updated".to_string(), None);
+                self.chat_widget
+                    .add_info_message("Reasoning view updated".to_string(), None);
             }
             AppEvent::UpdateModel(model) => {
                 self.chat_widget.set_model(&model);
@@ -347,35 +371,27 @@ impl App {
                     self.config.model_provider = provider;
                     self.chat_widget
                         .add_info_message(format!("Provider set to {provider_id}"), None);
-                    // Immediately scrub any provider keys that might have been written
-                    // by any config auto-save mechanism
-                    let codex_home = self.config.codex_home.clone();
-                    let profile = self.active_profile.clone();
-                    let model = self.config.model.clone();
-                    let effort = self.config.model_reasoning_effort;
-                    // Run synchronously to ensure it happens before any other operations
-                    let _ = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(async move {
-                            persist_model_without_provider(
-                                &codex_home,
-                                profile.as_deref(),
-                                &model,
-                                effort,
-                            )
-                            .await
-                        })
-                    });
+
+                    // Immediately scrub provider keys from config to prevent persistence
+                    self.spawn_provider_scrub();
                 } else {
-                    self.chat_widget.add_error_message(format!(
-                        "Unknown provider id: {provider_id}"
-                    ));
+                    self.chat_widget
+                        .add_error_message(format!("Unknown provider id: {provider_id}"));
                 }
             }
             AppEvent::PersistModelSelection { model, effort } => {
                 let profile = self.active_profile.as_deref();
-                match persist_model_selection(&self.config.codex_home, profile, &model, effort)
-                    .await
-                {
+
+                // Never persist provider; always persist only model/effort.
+                let persist_result = persist_model_without_provider(
+                    &self.config.codex_home,
+                    profile,
+                    &model,
+                    effort,
+                )
+                .await;
+
+                match persist_result {
                     Ok(()) => {
                         if let Some(profile) = profile {
                             self.chat_widget.add_info_message(
@@ -388,10 +404,7 @@ impl App {
                         }
                     }
                     Err(err) => {
-                        tracing::error!(
-                            error = %err,
-                            "failed to persist model selection"
-                        );
+                        tracing::error!(error = %err, "failed to persist model selection");
                         if let Some(profile) = profile {
                             self.chat_widget.add_error_message(format!(
                                 "Failed to save model for profile `{profile}`: {err}"
@@ -405,8 +418,15 @@ impl App {
             }
             // Removed provider persistence; provider is session-only.
             AppEvent::PersistReasoning(view) => {
-                if let Err(err) = persist_reasoning(&self.config.codex_home, self.active_profile.as_deref(), view).await {
-                    self.chat_widget.add_error_message(format!("Failed to save reasoning view: {err}"));
+                if let Err(err) = persist_reasoning(
+                    &self.config.codex_home,
+                    self.active_profile.as_deref(),
+                    view,
+                )
+                .await
+                {
+                    self.chat_widget
+                        .add_error_message(format!("Failed to save reasoning view: {err}"));
                 }
             }
             AppEvent::UpdateAskForApprovalPolicy(policy) => {
@@ -474,11 +494,12 @@ impl App {
                 ..
             } => {
                 // Toggle the most recent reasoning cell when composer is empty
-                if key_event.code == KeyCode::Char('r')
-                    && self.chat_widget.composer_is_empty()
-                {
+                if key_event.code == KeyCode::Char('r') && self.chat_widget.composer_is_empty() {
                     if let Some(cell) = self.transcript_cells.last() {
-                        if let Some(rs) = cell.as_any().downcast_ref::<crate::history_cell::ReasoningSummaryCell>() {
+                        if let Some(rs) = cell
+                            .as_any()
+                            .downcast_ref::<crate::history_cell::ReasoningSummaryCell>()
+                        {
                             rs.toggle();
                             tui.frame_requester().schedule_frame();
                             return;
@@ -514,15 +535,28 @@ async fn persist_reasoning(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e.into()),
     };
-    let mut doc = if contents.is_empty() { DocumentMut::new() } else { contents.parse::<DocumentMut>()? };
+    let mut doc = if contents.is_empty() {
+        DocumentMut::new()
+    } else {
+        contents.parse::<DocumentMut>()?
+    };
     let (hide, show_raw, summary) = match view {
         crate::cli::ReasoningViewArg::Hidden => (true, false, "none"),
         crate::cli::ReasoningViewArg::Summary => (false, false, "concise"),
         crate::cli::ReasoningViewArg::Raw => (false, true, "auto"),
     };
     let tbl = if let Some(profile) = active_profile {
-        let profiles = doc.as_table_mut().entry("profiles").or_insert(toml_edit::Item::Table(Default::default()));
-        profiles.as_table_mut().unwrap().entry(profile).or_insert(toml_edit::Item::Table(Default::default())).as_table_mut().unwrap()
+        let profiles = doc
+            .as_table_mut()
+            .entry("profiles")
+            .or_insert(toml_edit::Item::Table(Default::default()));
+        profiles
+            .as_table_mut()
+            .unwrap()
+            .entry(profile)
+            .or_insert(toml_edit::Item::Table(Default::default()))
+            .as_table_mut()
+            .unwrap()
     } else {
         doc.as_table_mut()
     };
@@ -531,6 +565,107 @@ async fn persist_reasoning(
     tbl.insert("model_reasoning_summary", value(summary));
     tokio::fs::create_dir_all(codex_home).await?;
     tokio::fs::write(&config_path, doc.to_string()).await?;
+    Ok(())
+}
+
+// Persist only model and reasoning effort without touching provider fields.
+pub(crate) async fn persist_model_without_provider(
+    codex_home: &std::path::Path,
+    active_profile: Option<&str>,
+    model: &str,
+    effort: Option<codex_protocol::config_types::ReasoningEffort>,
+) -> anyhow::Result<()> {
+    use toml_edit::{DocumentMut, Item, Table, value};
+    // Always write to the codex_home config, but also scrub provider keys from
+    // common legacy locations (~/.config/codex and ~/.codex), plus macOS AppSupport.
+
+    fn candidate_paths(codex_home: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut v = Vec::new();
+        v.push(codex_home.join("config.toml"));
+        if let Some(home) = std::env::var_os("HOME") {
+            let home = std::path::PathBuf::from(home);
+            v.push(home.join(".config/codex/config.toml"));
+            v.push(home.join(".codex/config.toml"));
+            #[cfg(target_os = "macos")]
+            v.push(home.join("Library/Application Support/codex/config.toml"));
+        }
+        v
+    }
+
+    async fn write_model_only(
+        path: &std::path::Path,
+        active_profile: Option<&str>,
+        model: &str,
+        effort: Option<codex_protocol::config_types::ReasoningEffort>,
+    ) -> anyhow::Result<()> {
+        let contents = match tokio::fs::read_to_string(path).await {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(e.into()),
+        };
+        let mut doc = if contents.is_empty() {
+            DocumentMut::new()
+        } else {
+            contents.parse::<DocumentMut>()?
+        };
+        // Choose correct table for writing model/effort
+        let tbl: &mut Table = if let Some(profile) = active_profile {
+            let profiles = doc
+                .as_table_mut()
+                .entry("profiles")
+                .or_insert(Item::Table(Default::default()));
+            profiles
+                .as_table_mut()
+                .unwrap()
+                .entry(profile)
+                .or_insert(Item::Table(Default::default()))
+                .as_table_mut()
+                .unwrap()
+        } else {
+            doc.as_table_mut()
+        };
+        // Update model/effort only
+        tbl.insert("model", value(model));
+        if let Some(e) = effort {
+            let _ = tbl.insert("model_reasoning_effort", value(e.to_string()));
+        } else {
+            let _ = tbl.remove("model_reasoning_effort");
+        }
+        // Scrub provider keys in the current table
+        let _ = tbl.remove("model_provider");
+        let _ = tbl.remove("model_provider_name");
+        let _ = tbl.remove("model_provider_id");
+
+        // Also scrub provider keys from all profile tables if present
+        if let Some(Item::Table(profiles)) = doc.as_table_mut().get_mut("profiles") {
+            for (_name, item) in profiles.iter_mut() {
+                if let Item::Table(t) = item {
+                    let _ = t.remove("model_provider");
+                    let _ = t.remove("model_provider_name");
+                    let _ = t.remove("model_provider_id");
+                }
+            }
+        }
+
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::write(path, doc.to_string()).await?;
+        Ok(())
+    }
+
+    // Write to the primary codex_home first.
+    write_model_only(
+        &codex_home.join("config.toml"),
+        active_profile,
+        model,
+        effort,
+    )
+    .await?;
+    // Then scrub provider keys from possible legacy paths.
+    for p in candidate_paths(codex_home) {
+        let _ = write_model_only(&p, active_profile, model, effort).await;
+    }
     Ok(())
 }
 

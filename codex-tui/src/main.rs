@@ -7,6 +7,7 @@ use owo_colors::OwoColorize;
 use supports_color::Stream;
 
 #[derive(Parser, Debug)]
+#[command(name = "codex-agentic")]
 struct TopCli {
     #[clap(flatten)]
     config_overrides: CliConfigOverrides,
@@ -29,7 +30,7 @@ fn main() -> anyhow::Result<()> {
         if !token_usage.is_zero() {
             println!("{}", codex_core::protocol::FinalOutput::from(token_usage),);
             if let Some(session_id) = conversation_id {
-                let command = format!("codex resume {session_id}");
+                let command = format!("codex-agentic resume {session_id}");
                 let prefix = "To continue this session, run ";
                 let suffix = ".";
                 if supports_color::on(Stream::Stdout).is_some() {

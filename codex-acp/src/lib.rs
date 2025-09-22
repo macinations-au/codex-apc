@@ -75,9 +75,7 @@ pub fn run_stdio_with_overrides_blocking(overrides: Vec<(String, toml::Value)>) 
         .enable_time()
         .enable_io()
         .build()?;
-    rt.block_on(async {
-        run_stdio_with_overrides(overrides, ConfigOverrides::default()).await
-    })
+    rt.block_on(async { run_stdio_with_overrides(overrides, ConfigOverrides::default()).await })
 }
 
 /// Load configuration using Codex defaults and optional CLI-style overrides, then

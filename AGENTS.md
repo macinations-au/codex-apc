@@ -81,6 +81,32 @@ git push -f origin v0.1.4
 - Installer: `scripts/install.sh` downloads the latest (or specified) release and installs the `codex-agentic` binary to `~/.cargo/bin`.
 - Launcher: `scripts/codex-agentic.sh` runs the freshest repo build and syncs `~/.cargo/bin/codex-agentic` to match, keeping editor integrations in lockstep.
 
+## Upgrade Banner & Version Detection
+codex-tui performs a lightweight update check on startup and can display an upgrade banner inside the TUI. We tailor this behavior to codex-agentic so users are directed to this repo (README) rather than upstream.
+
+- Detection source (default): GitHub Releases “latest” for this repo.
+- Display target (default): this repo’s README page.
+- Install command (optional): surfaced if provided by CI/packaging.
+
+Environment variables (read at runtime by `codex-agentic` before launching the TUI):
+
+- `CODEX_AGENTIC_UPDATE_REPO` — `owner/repo` slug (e.g., `macinations-au/codex-apc`). If set, detection points to `https://api.github.com/repos/<slug>/releases/latest`.
+- `CODEX_AGENTIC_UPGRADE_CMD` — shell one‑liner for upgrades; shown as “Run <cmd> to update.”
+- `CODEX_UPGRADE_URL` — URL to show when no command is supplied; defaults to `https://github.com/<slug>` (README).
+- `CODEX_UPDATE_LATEST_URL` — fully‑qualified override for the releases API endpoint (rarely needed when `CODEX_AGENTIC_UPDATE_REPO` is set).
+- `CODEX_CURRENT_VERSION` — version string used for comparison (defaults to `codex-agentic`’s Cargo version).
+- `CODEX_DISABLE_UPDATE_CHECK=1` — disables the banner entirely.
+
+CI/Release defaults:
+- Both `.github/workflows/ci.yml` and `.github/workflows/release.yml` set:
+  - `CODEX_AGENTIC_UPDATE_REPO=${{ github.repository }}`
+  - `CODEX_AGENTIC_UPGRADE_CMD=bash <(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh)`
+  - `CODEX_UPGRADE_URL=https://github.com/${{ github.repository }}`
+
+Version comparison:
+- Accepts `vX.Y.Z`, `rust-vX.Y.Z`, or `X.Y.Z[-apc.N]`.
+- Pre-releases like `beta`/`rc` are ignored for “newer?” checks; `-apc.N` compares numerically when `X.Y.Z` matches.
+
 ## Useful Commands
 ```bash
 # Build & test locally (single binary)
