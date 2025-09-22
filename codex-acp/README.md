@@ -94,6 +94,7 @@ make smoke
     - `/model` — Show or set the current model (uses `Op::OverrideTurnContext`).
     - `/approvals` — Set approval mode (`untrusted | on-request | on-failure | never`).
     - `/status` — Rich status (workspace, account, model, token usage).
+    - `/reasoning <hidden|summary|raw>` — control whether to show thinking (raw), show concise summaries, or hide it.
 
 - Available commands with custom prompts
   - On new session the agent first advertises built-in commands.
@@ -143,3 +144,27 @@ Notes
 - Zed ACP example (Claude): https://github.com/zed-industries/claude-code-acp
 - Agent Client Protocol (Rust): https://crates.io/crates/agent-client-protocol
 - OpenAI Codex (Rust workspace): https://github.com/openai/codex
+
+## Library Embedding
+
+You can embed the ACP stdio server into another binary (e.g., `codex-cli`) without hacks. The crate exposes a small API:
+
+```rust
+// In your binary crate (e.g., codex-cli)
+use codex_acp::{run_stdio_with_config};
+use codex_core::config::{Config, ConfigOverrides};
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> anyhow::Result<()> {
+    // parse flags... if --acp set:
+    let cfg = Config::load_with_cli_overrides(vec![], ConfigOverrides::default())?;
+    run_stdio_with_config(cfg).await
+}
+```
+
+Helpers:
+- `run_stdio_with_config(config)` — async; takes ownership of stdio.
+- `run_stdio(overrides, cfg_overrides)` — async; loads config then runs.
+- `run_stdio_blocking()` — sets up a single‑threaded runtime and runs; convenient from non‑async mains.
+
+This lets `codex-cli` default to its existing CLI/TUI, and switch to ACP when `--acp` is provided.

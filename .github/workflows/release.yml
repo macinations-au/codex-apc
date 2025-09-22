@@ -37,7 +37,7 @@ jobs:
             codex-acp -> target
 
       - name: Build (release)
-        working-directory: codex-acp
+        working-directory: codex-agentic
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: true
         run: |
@@ -59,13 +59,13 @@ jobs:
           VER="${GITHUB_REF_NAME}"
           OS="${{ steps.plat.outputs.os }}"
           ARCH="${{ steps.plat.outputs.arch }}"
-          NAME="codex-acp-${VER}-${OS}-${ARCH}"
+          NAME="codex-agentic-${VER}-${OS}-${ARCH}"
           mkdir -p package dist
-          cp codex-acp/target/release/codex-acp package/
-          chmod +x package/codex-acp
+          cp codex-agentic/target/release/codex-agentic package/
+          chmod +x package/codex-agentic
           cp LICENSE package/
           cp README.md package/README.md
-          cp codex-acp/README.md package/README-codex-acp.md
+          echo "See upstream codex for CLI docs; this binary delegates to upstream CLI by default. Use --acp for ACP mode." > package/README-agentic.md
           tar -C package -czf "dist/${NAME}.tar.gz" .
           echo "asset=dist/${NAME}.tar.gz" >> "$GITHUB_OUTPUT"
 

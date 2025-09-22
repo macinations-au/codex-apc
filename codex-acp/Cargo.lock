@@ -539,7 +539,7 @@ dependencies = [
 
 [[package]]
 name = "codex-acp"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -558,7 +558,7 @@ dependencies = [
 [[package]]
 name = "codex-ansi-escape"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "ansi-to-tui",
  "ratatui",
@@ -568,7 +568,7 @@ dependencies = [
 [[package]]
 name = "codex-apply-patch"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "anyhow",
  "once_cell",
@@ -581,7 +581,7 @@ dependencies = [
 [[package]]
 name = "codex-arg0"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "anyhow",
  "codex-apply-patch",
@@ -595,7 +595,7 @@ dependencies = [
 [[package]]
 name = "codex-chatgpt"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "anyhow",
  "clap",
@@ -611,7 +611,7 @@ dependencies = [
 [[package]]
 name = "codex-cli"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "anyhow",
  "clap",
@@ -635,7 +635,7 @@ dependencies = [
 [[package]]
 name = "codex-common"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "clap",
  "codex-core",
@@ -647,7 +647,7 @@ dependencies = [
 [[package]]
 name = "codex-core"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -698,7 +698,7 @@ dependencies = [
 [[package]]
 name = "codex-exec"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "anyhow",
  "chrono",
@@ -720,7 +720,7 @@ dependencies = [
 [[package]]
 name = "codex-file-search"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "anyhow",
  "clap",
@@ -734,7 +734,7 @@ dependencies = [
 [[package]]
 name = "codex-linux-sandbox"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "anyhow",
  "clap",
@@ -748,7 +748,7 @@ dependencies = [
 [[package]]
 name = "codex-login"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -771,7 +771,7 @@ dependencies = [
 [[package]]
 name = "codex-mcp-client"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "anyhow",
  "mcp-types",
@@ -785,7 +785,7 @@ dependencies = [
 [[package]]
 name = "codex-mcp-server"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "anyhow",
  "codex-arg0",
@@ -809,7 +809,7 @@ dependencies = [
 [[package]]
 name = "codex-ollama"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "async-stream",
  "bytes",
@@ -826,7 +826,7 @@ dependencies = [
 [[package]]
 name = "codex-protocol"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "base64 0.22.1",
  "mcp-types",
@@ -845,7 +845,7 @@ dependencies = [
 [[package]]
 name = "codex-protocol-ts"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "anyhow",
  "clap",
@@ -856,7 +856,7 @@ dependencies = [
 [[package]]
 name = "codex-tui"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2370,7 +2370,7 @@ dependencies = [
 [[package]]
 name = "mcp-types"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex#0269096229e8c8bd95185173706807dc10838c7a"
+source = "git+https://github.com/openai/codex?rev=0269096229e8c8bd95185173706807dc10838c7a#0269096229e8c8bd95185173706807dc10838c7a"
 dependencies = [
  "serde",
  "serde_json",

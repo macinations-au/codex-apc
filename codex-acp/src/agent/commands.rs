@@ -1,4 +1,5 @@
 use super::*;
+use codex_core::protocol_config_types::ReasoningSummary;
 use agent_client_protocol::{AvailableCommand, AvailableCommandInput};
 use codex_core::protocol::{AskForApproval, EventMsg, Op, SandboxPolicy, Submission};
 use std::{fs, io};
@@ -40,6 +41,18 @@ impl CodexAgent {
             AvailableCommand {
                 name: "status".into(),
                 description: "show current session configuration and token usage".into(),
+                input: None,
+                meta: None,
+            },
+            AvailableCommand {
+                name: "reasoning".into(),
+                description: "choose how to display reasoning: hidden | summary | raw".into(),
+                input: Some(AvailableCommandInput::Unstructured { hint: "hidden|summary|raw".into() }),
+                meta: None,
+            },
+            AvailableCommand {
+                name: "models".into(),
+                description: "list available models for the current provider (e.g., Ollama in --oss)".into(),
                 input: None,
                 meta: None,
             },
@@ -192,6 +205,83 @@ Notes for Agents
                 self.send_message_chunk(session_id, status_text.into(), tx)?;
                 let _ = rx.await;
                 return Ok(true);
+            }
+            "reasoning" => {
+                let arg = _rest.trim().to_lowercase();
+                let sid_str = session_id.0.to_string();
+                let summary = match arg.as_str() {
+                    "hidden" => Some(ReasoningSummary::None),
+                    "summary" => Some(ReasoningSummary::Concise),
+                    "raw" => Some(ReasoningSummary::Auto),
+                    _ => None,
+                };
+                if let Some(summary) = summary {
+                    let submit_id = format!("s{}-{}", sid_str, self.next_submit_seq.get());
+                    self.next_submit_seq.set(self.next_submit_seq.get() + 1);
+                    let op = Op::OverrideTurnContext { cwd: None, approval_policy: None, sandbox_policy: None, model: None, effort: None, summary: Some(summary) };
+                    if let Some(conv) = session.conversation.as_ref() {
+                        conv.submit_with_id(Submission { id: submit_id, op })
+                            .await
+                            .map_err(Error::into_internal_error)?;
+                    }
+                    let msg = format!("Reasoning set to: {}", arg);
+                    let (tx, rx) = oneshot::channel();
+                    self.send_message_chunk(session_id, msg.into(), tx)?;
+                    let _ = rx.await;
+                } else {
+                    let (tx, rx) = oneshot::channel();
+                    self.send_message_chunk(session_id, "Usage: /reasoning hidden|summary|raw".into(), tx)?;
+                    let _ = rx.await;
+                }
+                return Ok(true);
+            }
+            "models" => {
+                // Provider-specific listing; for OSS provider, query local Ollama
+                let provider = self.config.model_provider_id.clone();
+                if provider == "oss" {
+                    let cfg = self.config.clone();
+                    let sid = session_id.clone();
+                    let tx_updates = self.session_update_tx.clone();
+                    tokio::task::spawn_local(async move {
+                        let result = async {
+                            let client = codex_ollama::OllamaClient::try_from_oss_provider(&cfg)
+                                .await
+                                .map_err(Error::into_internal_error)?;
+                            let list = client
+                                .fetch_models()
+                                .await
+                                .map_err(Error::into_internal_error)?;
+                            let mut out = String::from("## OSS Models (Ollama)\n");
+                            for m in list {
+                                out.push_str(&format!("- {}\n", m));
+                            }
+                            Ok::<String, Error>(out)
+                        }
+                        .await;
+
+                        let text = match result {
+                            Ok(s) => s,
+                            Err(e) => format!("Failed to list Ollama models: {}", e),
+                        };
+                        let (tx, rx) = oneshot::channel();
+                        let _ = tx_updates.send((
+                            SessionNotification {
+                                session_id: sid,
+                                update: SessionUpdate::AgentMessageChunk { content: text.into() },
+                                meta: None,
+                            },
+                            tx,
+                        ));
+                        let _ = rx.await;
+                    });
+                    return Ok(true);
+                } else {
+                    let msg = "Provider does not expose a local model list. Use --oss for Ollama, or configure providers via -c model_providers.*";
+                    let (tx, rx) = oneshot::channel();
+                    self.send_message_chunk(session_id, msg.into(), tx)?;
+                    let _ = rx.await;
+                    return Ok(true);
+                }
             }
             "model" => {
                 let rest = _rest.trim();
