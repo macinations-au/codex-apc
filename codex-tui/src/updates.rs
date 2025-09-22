@@ -14,6 +14,9 @@ use codex_core::default_client::create_client;
 use crate::version::CODEX_CLI_VERSION;
 
 pub fn get_upgrade_version(config: &Config) -> Option<String> {
+    if std::env::var("CODEX_DISABLE_UPDATE_CHECK").ok().as_deref() == Some("1") {
+        return None;
+    }
     let version_file = version_filepath(config);
     let info = read_version_info(&version_file).ok();
 
@@ -31,8 +34,10 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
         });
     }
 
+    let current = current_version();
+
     info.and_then(|info| {
-        if is_newer(&info.latest_version, CODEX_CLI_VERSION).unwrap_or(false) {
+        if is_newer(&info.latest_version, &current).unwrap_or(false) {
             Some(info.latest_version)
         } else {
             None
@@ -53,7 +58,13 @@ struct ReleaseInfo {
 }
 
 const VERSION_FILENAME: &str = "version.json";
-const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
+
+fn latest_release_url() -> String {
+    // Allow downstream launchers (e.g., codex-agentic) to override the
+    // releases feed via env. Fallback to upstream Codex releases.
+    std::env::var("CODEX_UPDATE_LATEST_URL")
+        .unwrap_or_else(|_| "https://api.github.com/repos/openai/codex/releases/latest".to_string())
+}
 
 fn version_filepath(config: &Config) -> PathBuf {
     config.codex_home.join(VERSION_FILENAME)
@@ -68,7 +79,7 @@ async fn check_for_update(version_file: &Path) -> anyhow::Result<()> {
     let ReleaseInfo {
         tag_name: latest_tag_name,
     } = create_client()
-        .get(LATEST_RELEASE_URL)
+        .get(latest_release_url())
         .send()
         .await?
         .error_for_status()?
@@ -76,8 +87,7 @@ async fn check_for_update(version_file: &Path) -> anyhow::Result<()> {
         .await?;
 
     let info = VersionInfo {
-        latest_version: latest_tag_name
-            .strip_prefix("rust-v")
+        latest_version: normalize_tag_name(&latest_tag_name)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse latest tag name '{latest_tag_name}'"))?
             .into(),
         last_checked_at: Utc::now(),
@@ -98,12 +108,66 @@ fn is_newer(latest: &str, current: &str) -> Option<bool> {
     }
 }
 
-fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
-    let mut iter = v.trim().split('.');
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct ParsedVersion {
+    maj: u64,
+    min: u64,
+    pat: u64,
+    // Optional downstream patch indicator: e.g. 0.39.0-apc.3 → ("apc", 3)
+    // Only used as a tiebreaker when maj.min.pat are equal and both have
+    // the same variant prefix.
+    variant_num: Option<u64>,
+}
+
+fn parse_version(v: &str) -> Option<ParsedVersion> {
+    let v = v.trim();
+    let (core, suffix) = v.split_once('-').map(|(a, b)| (a, Some(b))).unwrap_or((v, None));
+    let mut iter = core.split('.');
     let maj = iter.next()?.parse::<u64>().ok()?;
     let min = iter.next()?.parse::<u64>().ok()?;
     let pat = iter.next()?.parse::<u64>().ok()?;
-    Some((maj, min, pat))
+
+    // Optional: recognize "apc.<y>" and capture y as downstream tiebreaker.
+    // If there is any other suffix (e.g., beta, rc), treat the whole version as
+    // unparsable to avoid making claims about prereleases.
+    let variant_num = match suffix {
+        None => None,
+        Some(s) => {
+            if let Some(rest) = s.strip_prefix("apc.") {
+                rest.split(|c: char| !c.is_ascii_digit())
+                    .next()
+                    .and_then(|n| n.parse::<u64>().ok())
+            } else {
+                return None;
+            }
+        }
+    };
+
+    Some(ParsedVersion {
+        maj,
+        min,
+        pat,
+        variant_num,
+    })
+}
+
+fn normalize_tag_name(tag: &str) -> Option<&str> {
+    // Accept tags like "rust-v0.39.0", "v0.39.0", or plain "0.39.0-apc.1".
+    if let Some(s) = tag.strip_prefix("rust-v") {
+        Some(s)
+    } else if let Some(s) = tag.strip_prefix('v') {
+        Some(s)
+    } else if tag.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        Some(tag)
+    } else {
+        None
+    }
+}
+
+fn current_version() -> String {
+    // Allow downstream to provide its own version (e.g., codex-agentic’s
+    // Cargo version), otherwise fall back to this crate’s package version.
+    std::env::var("CODEX_CURRENT_VERSION").unwrap_or_else(|_| CODEX_CLI_VERSION.to_string())
 }
 
 #[cfg(test)]
@@ -126,7 +190,18 @@ mod tests {
 
     #[test]
     fn whitespace_is_ignored() {
-        assert_eq!(parse_version(" 1.2.3 \n"), Some((1, 2, 3)));
+        assert_eq!(parse_version(" 1.2.3 \n").map(|p| (p.maj, p.min, p.pat)), Some((1, 2, 3)));
         assert_eq!(is_newer(" 1.2.3 ", "1.2.2"), Some(true));
+    }
+
+    #[test]
+    fn apc_suffix_is_recognized_and_compares() {
+        let a = parse_version("0.39.0-apc.1").unwrap();
+        let b = parse_version("0.39.0-apc.2").unwrap();
+        assert!(b > a);
+        // Equal core version, only one side has apc suffix → treat as equal core,
+        // no conclusion for is_newer (returns None) unless both parse.
+        assert_eq!(is_newer("0.39.0-apc.2", "0.39.0"), Some(true));
+        assert_eq!(is_newer("0.39.0", "0.39.0-apc.2"), Some(false));
     }
 }

@@ -1,7 +1,7 @@
 use super::*;
-use codex_core::protocol_config_types::ReasoningSummary;
 use agent_client_protocol::{AvailableCommand, AvailableCommandInput};
 use codex_core::protocol::{AskForApproval, EventMsg, Op, SandboxPolicy, Submission};
+use codex_core::protocol_config_types::{ReasoningEffort, ReasoningSummary};
 use std::{fs, io};
 use tokio::sync::oneshot;
 
@@ -47,13 +47,9 @@ impl CodexAgent {
             AvailableCommand {
                 name: "reasoning".into(),
                 description: "choose how to display reasoning: hidden | summary | raw".into(),
-                input: Some(AvailableCommandInput::Unstructured { hint: "hidden|summary|raw".into() }),
-                meta: None,
-            },
-            AvailableCommand {
-                name: "models".into(),
-                description: "list available models for the current provider (e.g., Ollama in --oss)".into(),
-                input: None,
+                input: Some(AvailableCommandInput::Unstructured {
+                    hint: "hidden|summary|raw".into(),
+                }),
                 meta: None,
             },
         ]
@@ -190,11 +186,7 @@ Notes for Agents
                     return Ok(true);
                 } else {
                     let (tx, rx) = oneshot::channel();
-                    self.send_message_chunk(
-                        session_id,
-                        "Usage: //thoughts on|off".into(),
-                        tx,
-                    )?;
+                    self.send_message_chunk(session_id, "Usage: //thoughts on|off".into(), tx)?;
                     let _ = rx.await;
                     return Ok(true);
                 }
@@ -218,7 +210,14 @@ Notes for Agents
                 if let Some(summary) = summary {
                     let submit_id = format!("s{}-{}", sid_str, self.next_submit_seq.get());
                     self.next_submit_seq.set(self.next_submit_seq.get() + 1);
-                    let op = Op::OverrideTurnContext { cwd: None, approval_policy: None, sandbox_policy: None, model: None, effort: None, summary: Some(summary) };
+                    let op = Op::OverrideTurnContext {
+                        cwd: None,
+                        approval_policy: None,
+                        sandbox_policy: None,
+                        model: None,
+                        effort: None,
+                        summary: Some(summary),
+                    };
                     if let Some(conv) = session.conversation.as_ref() {
                         conv.submit_with_id(Submission { id: submit_id, op })
                             .await
@@ -230,70 +229,51 @@ Notes for Agents
                     let _ = rx.await;
                 } else {
                     let (tx, rx) = oneshot::channel();
-                    self.send_message_chunk(session_id, "Usage: /reasoning hidden|summary|raw".into(), tx)?;
+                    self.send_message_chunk(
+                        session_id,
+                        "Usage: /reasoning hidden|summary|raw".into(),
+                        tx,
+                    )?;
                     let _ = rx.await;
                 }
                 return Ok(true);
-            }
-            "models" => {
-                // Provider-specific listing; for OSS provider, query local Ollama
-                let provider = self.config.model_provider_id.clone();
-                if provider == "oss" {
-                    let cfg = self.config.clone();
-                    let sid = session_id.clone();
-                    let tx_updates = self.session_update_tx.clone();
-                    tokio::task::spawn_local(async move {
-                        let result = async {
-                            let client = codex_ollama::OllamaClient::try_from_oss_provider(&cfg)
-                                .await
-                                .map_err(Error::into_internal_error)?;
-                            let list = client
-                                .fetch_models()
-                                .await
-                                .map_err(Error::into_internal_error)?;
-                            let mut out = String::from("## OSS Models (Ollama)\n");
-                            for m in list {
-                                out.push_str(&format!("- {}\n", m));
-                            }
-                            Ok::<String, Error>(out)
-                        }
-                        .await;
-
-                        let text = match result {
-                            Ok(s) => s,
-                            Err(e) => format!("Failed to list Ollama models: {}", e),
-                        };
-                        let (tx, rx) = oneshot::channel();
-                        let _ = tx_updates.send((
-                            SessionNotification {
-                                session_id: sid,
-                                update: SessionUpdate::AgentMessageChunk { content: text.into() },
-                                meta: None,
-                            },
-                            tx,
-                        ));
-                        let _ = rx.await;
-                    });
-                    return Ok(true);
-                } else {
-                    let msg = "Provider does not expose a local model list. Use --oss for Ollama, or configure providers via -c model_providers.*";
-                    let (tx, rx) = oneshot::channel();
-                    self.send_message_chunk(session_id, msg.into(), tx)?;
-                    let _ = rx.await;
-                    return Ok(true);
-                }
             }
             "model" => {
                 let rest = _rest.trim();
                 if rest.is_empty() {
                     let msg = format!(
-                        "Current model: {}\nUsage: /model <model-slug>",
+                        "Current model: {}\nUsage: /model <model-slug> [low|medium|high]",
                         self.config.model,
                     );
                     let (tx, rx) = oneshot::channel();
                     self.send_message_chunk(session_id, msg.into(), tx)?;
                     let _ = rx.await;
                     return Ok(true);
+                }
+
+                // Parse model and optional reasoning effort
+                let parts: Vec<&str> = rest.split_whitespace().collect();
+                let model_name = parts[0].to_string();
+                let effort = if parts.len() > 1 {
+                    match parts[1].to_lowercase().as_str() {
+                        "low" => Some(ReasoningEffort::Low),
+                        "medium" => Some(ReasoningEffort::Medium),
+                        "high" => Some(ReasoningEffort::High),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+
+                // Update session state
+                {
+                    let mut sessions = self.sessions.borrow_mut();
+                    if let Some(state) = sessions.get_mut(&sid_str) {
+                        state.current_model = model_name.clone();
+                        if let Some(e) = effort {
+                            state.current_effort = e;
+                        }
+                    }
                 }
 
                 // Request Codex to change the model for subsequent turns.
@@ -303,8 +283,8 @@ Notes for Agents
                     cwd: None,
                     approval_policy: None,
                     sandbox_policy: None,
-                    model: Some(rest.to_string()),
-                    effort: None,
+                    model: Some(model_name.clone()),
+                    effort,
                     summary: None,
                 };
                 if let Some(conv) = session.conversation.as_ref() {
@@ -319,10 +299,10 @@ Notes for Agents
                     return Ok(true);
                 }
 
-                // Provide immediate feedback to the user.
-                let ack = format!("Requested model change to: {}", rest);
+                // Show updated status after model change
+                let status_text = self.render_status(&sid_str).await;
                 let (tx, rx) = oneshot::channel();
-                self.send_message_chunk(session_id, ack.into(), tx)?;
+                self.send_message_chunk(session_id, status_text.into(), tx)?;
                 let _ = rx.await;
                 return Ok(true);
             }
@@ -444,10 +424,9 @@ Notes for Agents
                             .map_err(Error::into_internal_error)?;
                         let _ = rx.await;
                     }
-                    EventMsg::AgentMessage(msg) => {
-                        let (tx, rx) = oneshot::channel();
-                        self.send_message_chunk(session_id, msg.message.into(), tx)?;
-                        let _ = rx.await;
+                    EventMsg::AgentMessage(_msg) => {
+                        // Skip complete message since we're already sending deltas
+                        // This prevents duplicate text in the chat interface
                     }
                     EventMsg::TaskComplete(_) | EventMsg::ShutdownComplete => {
                         break;
@@ -468,7 +447,7 @@ Notes for Agents
 
     pub(crate) async fn render_status(&self, sid_str: &str) -> String {
         // Session snapshot
-        let (approval_mode, sandbox_mode, token_usage, session_uuid) = {
+        let (approval_mode, sandbox_mode, token_usage, session_uuid, current_model, current_effort) = {
             let map = self.sessions.borrow();
             if let Some(state) = map.get(sid_str) {
                 (
@@ -476,6 +455,8 @@ Notes for Agents
                     state.current_sandbox.clone(),
                     state.token_usage.clone(),
                     state.conversation_id.clone(),
+                    state.current_model.clone(),
+                    state.current_effort,
                 )
             } else {
                 (
@@ -483,6 +464,8 @@ Notes for Agents
                     SandboxPolicy::new_workspace_write_policy(),
                     None,
                     String::new(),
+                    self.config.model.clone(),
+                    self.config.model_reasoning_effort,
                 )
             }
         };
@@ -526,9 +509,9 @@ Notes for Agents
             };
 
         // Model
-        let model = &self.config.model;
+        let model = &current_model;
         let provider = self.title_case(&self.config.model_provider_id);
-        let effort = format!("{:?}", self.config.model_reasoning_effort);
+        let effort = format!("{:?}", current_effort);
         let summary = format!("{:?}", self.config.model_reasoning_summary);
 
         let reasoning_on = {

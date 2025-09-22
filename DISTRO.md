@@ -17,7 +17,7 @@ This repository is a downstream distribution that tracks upstream `openai/codex`
 ## Modes
 
 - ACP mode (stdio): provided by this repo (`codex-acp`), intended for IDEs that speak ACP.
-- CLI/TUI mode: provided by `codex-agentic` with a vendor-patched TUI. The `/model` picker includes Ollama models and persists provider+model.
+- CLI/TUI mode: provided by `codex-agentic` with a vendor-patched TUI. The `/model` picker includes Ollama models; it saves model only (provider is session-only).
 
 ## Extras (Downstream Only)
 

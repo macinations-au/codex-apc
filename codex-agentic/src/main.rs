@@ -1,474 +1,256 @@
 use anyhow::{Context, Result};
-use clap::Parser as _;
+use clap::{Parser, Subcommand};
 use codex_core::config::ConfigOverrides as CoreConfigOverrides;
 use std::env;
 use std::ffi::OsString;
-use std::io::{self, Write};
-use std::process::{Command, Stdio};
 use toml::Value as TomlValue;
-use toml::map::Map as TomlMap;
+
+#[derive(Parser, Debug)]
+#[command(name = "codex-agentic", version, about = "Combined launcher: embedded CLI by default; ACP mode with 'acp'")]
+struct CliArgs {
+    #[command(subcommand)]
+    cmd: Option<Cmd>,
+
+    /// Legacy: run ACP server (deprecated; use `codex-agentic acp`)
+    #[arg(long, hide = true)]
+    acp: bool,
+
+    /// Legacy: list models (OSS). Prefer `codex-agentic models list --oss`.
+    #[arg(long, hide = true)]
+    list_models: bool,
+
+    /// Trailing args forwarded to embedded CLI when no subcommand is used
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    forward: Vec<OsString>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Cmd {
+    /// Run ACP stdio server
+    #[command(
+        about = "Run ACP stdio server",
+        long_about = "Runs the agent over stdin/stdout for editors (e.g., Zed).\n\nUse first-class flags for common settings (like --model, --oss). Use -c/--config for advanced or nested keys (key=value, JSON-parseable).",
+        after_help = "Examples:\n  # Pick model + medium effort\n  codex-agentic acp --model gpt-4o-mini --model-reasoning-effort medium\n\n  # Use local Ollama provider + model\n  codex-agentic acp --oss -c model=\"qwq:latest\"\n\n  # Safer auto-exec in workspace\n  codex-agentic acp -c ask_for_approval=\"on-failure\" -c sandbox_mode=\"workspace-write\"\n\n  # Hide reasoning completely\n  codex-agentic acp -c model_reasoning_summary=\"none\" -c hide_agent_reasoning=true\n\n  # Set working directory\n  codex-agentic acp -c cwd=\"/path/to/project\"\n\n  # YOLO mode with search (dangerous): no approvals, no sandbox, enable web search\n  codex-agentic acp --yolo-with-search\n"
+    )]
+    Acp {
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long = "model-provider")]
+        model_provider: Option<String>,
+        #[arg(long = "model-reasoning-effort")]
+        model_reasoning_effort: Option<String>,
+        #[arg(long = "model-reasoning-summary")]
+        model_reasoning_summary: Option<String>,
+        #[arg(long = "model-verbosity")]
+        model_verbosity: Option<String>,
+        #[arg(long)]
+        hide_agent_reasoning: bool,
+        #[arg(long)]
+        show_raw_agent_reasoning: bool,
+        #[arg(long)]
+        oss: bool,
+        /// YOLO mode: no approvals, no sandbox, enable web search (dangerous!)
+        #[arg(long = "yolo-with-search", help = "No approvals, no sandbox, and enable web search (DANGEROUS)")]
+        yolo_with_search: bool,
+        #[arg(short = 'c', long = "config", help = "Override config: -c key=value (repeat). Values parse as JSON if possible.")]
+        config_overrides: Vec<String>,
+    },
+    /// Launch the embedded CLI (default) and forward args to it
+    Cli {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<OsString>,
+    },
+    /// Utilities
+    #[command(subcommand)]
+    Models(ModelsCmd),
+    /// Print common examples and config recipes
+    #[command(name = "help-recipes")]
+    HelpRecipes,
+}
+
+#[derive(Subcommand, Debug)]
+enum ModelsCmd {
+    /// List models (currently supports --oss provider)
+    List {
+        #[arg(long)]
+        oss: bool,
+        #[arg(short = 'c', long = "config")]
+        config_overrides: Vec<String>,
+    },
+}
 
 fn main() -> Result<()> {
-    // Early fast-path: support `--list-models` in CLI mode before any passthrough.
-    {
-        let args_utf: Vec<String> = env::args().skip(1).collect();
-        if args_utf.iter().any(|a| a == "--list-models") {
-            // Build minimal overrides: honor --oss/--OSS and -c/--config pairs
-            let mut kv_overrides: Vec<(String, TomlValue)> = Vec::new();
-            if args_utf.iter().any(|a| a == "--oss" || a == "--OSS") {
-                kv_overrides.push((
-                    "model_provider".to_string(),
-                    TomlValue::String("oss".into()),
-                ));
-            }
-            let mut i = 0;
-            while i < args_utf.len() {
-                let a = &args_utf[i];
-                if (a == "-c" || a == "--config") && i + 1 < args_utf.len() {
-                    let s = &args_utf[i + 1];
-                    if let Some(eq) = s.find('=') {
-                        let (k, vraw) = s.split_at(eq);
+    let cli = CliArgs::parse();
+
+    if let Some(cmd) = &cli.cmd {
+        match cmd {
+            Cmd::Acp { model, profile, cwd, model_provider, model_reasoning_effort, model_reasoning_summary, model_verbosity, hide_agent_reasoning, show_raw_agent_reasoning, oss, yolo_with_search, config_overrides } => {
+                let mut overrides: Vec<(String, TomlValue)> = Vec::new();
+                let mut typed_overrides: CoreConfigOverrides = CoreConfigOverrides::default();
+                if *yolo_with_search {
+                    // Add dangerous defaults first so specific -c keys can override them.
+                    overrides.push(("ask_for_approval".into(), TomlValue::String("never".into())));
+                    overrides.push(("sandbox_mode".into(), TomlValue::String("danger-full-access".into())));
+                    overrides.push(("tools.web_search_request".into(), TomlValue::Boolean(true)));
+                }
+                if let Some(v) = model { overrides.push(("model".into(), TomlValue::String(v.clone()))); }
+                if let Some(v) = profile { overrides.push(("profile".into(), TomlValue::String(v.clone()))); }
+                if let Some(v) = cwd { overrides.push(("cwd".into(), TomlValue::String(v.clone()))); }
+                if let Some(v) = model_provider { overrides.push(("model_provider".into(), TomlValue::String(v.clone()))); }
+                if let Some(v) = model_reasoning_effort { overrides.push(("model_reasoning_effort".into(), TomlValue::String(v.clone()))); }
+                if let Some(v) = model_reasoning_summary { overrides.push(("model_reasoning_summary".into(), TomlValue::String(v.clone()))); }
+                if let Some(v) = model_verbosity { overrides.push(("model_verbosity".into(), TomlValue::String(v.clone()))); }
+                if *hide_agent_reasoning { overrides.push(("hide_agent_reasoning".into(), TomlValue::Boolean(true))); }
+                if *show_raw_agent_reasoning { overrides.push(("show_raw_agent_reasoning".into(), TomlValue::Boolean(true))); }
+                if *oss { typed_overrides.model_provider = Some(codex_core::BUILT_IN_OSS_MODEL_PROVIDER_ID.to_string()); }
+                for kv in config_overrides {
+                    if let Some(eq) = kv.find('=') {
+                        let (k, vraw) = kv.split_at(eq);
                         let vraw = &vraw[1..];
-                        let val = toml::from_str::<TomlValue>(vraw)
-                            .unwrap_or_else(|_| TomlValue::String(vraw.to_string()));
+                        let val = toml::from_str::<TomlValue>(vraw).unwrap_or_else(|_| TomlValue::String(vraw.to_string()));
+                        overrides.push((k.to_string(), val));
+                    }
+                }
+                let rt = tokio::runtime::Builder::new_current_thread().enable_time().enable_io().build().context("tokio runtime for ACP stdio")?;
+                return rt.block_on(async move { codex_acp::run_stdio_with_overrides(overrides, typed_overrides).await });
+            }
+            Cmd::Models(ModelsCmd::List { oss, config_overrides }) => {
+                let mut kv_overrides: Vec<(String, TomlValue)> = Vec::new();
+                if *oss { kv_overrides.push(("model_provider".into(), TomlValue::String("oss".into()))); }
+                for kv in config_overrides {
+                    if let Some(eq) = kv.find('=') {
+                        let (k, vraw) = kv.split_at(eq);
+                        let vraw = &vraw[1..];
+                        let val = toml::from_str::<TomlValue>(vraw).unwrap_or_else(|_| TomlValue::String(vraw.to_string()));
                         kv_overrides.push((k.to_string(), val));
                     }
-                    i += 1;
                 }
-                i += 1;
+                list_models(kv_overrides)?;
+                return Ok(());
             }
-            // Treat provider selection as session-only: prefer typed overrides
-            // instead of writing a key/value that might be persisted by
-            // downstream helpers. Only set provider via typed override here.
-            let mut typed_over = CoreConfigOverrides::default();
-            if kv_overrides.iter().any(|(k, _)| k == "model_provider") {
-                // Remove any accidental KV provider override
-                let kv_overrides: Vec<(String, TomlValue)> = kv_overrides
-                    .into_iter()
-                    .filter(|(k, _)| k != "model_provider")
-                    .collect();
-                typed_over.model_provider =
-                    Some(codex_core::BUILT_IN_OSS_MODEL_PROVIDER_ID.to_string());
-                let cfg =
-                    codex_core::config::Config::load_with_cli_overrides(kv_overrides, typed_over)
-                        .context("load config for --list-models")?;
-                if cfg.model_provider_id != "oss" {
-                    eprintln!("--list-models currently supports --oss (Ollama) provider only.");
-                    return Ok(());
-                }
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_time()
-                    .enable_io()
-                    .build()
-                    .context("tokio runtime for --list-models")?;
-                rt.block_on(async move {
-                    match codex_ollama::OllamaClient::try_from_oss_provider(&cfg).await {
-                        Ok(client) => match client.fetch_models().await {
-                            Ok(models) => {
-                                for m in models {
-                                    println!("{}", m);
-                                }
-                            }
-                            Err(e) => eprintln!("error: failed to fetch models: {}", e),
-                        },
-                        Err(e) => eprintln!("error: {}", e),
-                    }
-                });
-            } else {
-                let cfg =
-                    codex_core::config::Config::load_with_cli_overrides(kv_overrides, typed_over)
-                        .context("load config for --list-models")?;
-                if cfg.model_provider_id != "oss" {
-                    eprintln!("--list-models currently supports --oss (Ollama) provider only.");
-                    return Ok(());
-                }
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_time()
-                    .enable_io()
-                    .build()
-                    .context("tokio runtime for --list-models")?;
-                rt.block_on(async move {
-                    match codex_ollama::OllamaClient::try_from_oss_provider(&cfg).await {
-                        Ok(client) => match client.fetch_models().await {
-                            Ok(models) => {
-                                for m in models {
-                                    println!("{}", m);
-                                }
-                            }
-                            Err(e) => eprintln!("error: failed to fetch models: {}", e),
-                        },
-                        Err(e) => eprintln!("error: {}", e),
-                    }
-                });
-            }
-            return Ok(());
+            Cmd::Cli { args } => { return run_embedded_cli(args); }
+            Cmd::HelpRecipes => { print_recipes(); return Ok(()); }
         }
     }
 
-    // Parse minimal flag: --acp/--ACP. Everything else is forwarded untouched.
-    let mut has_acp = false;
-    let mut forward: Vec<OsString> = Vec::new();
-    // For ACP mode overrides
-    let mut overrides: Vec<(String, TomlValue)> = Vec::new();
-    // Typed overrides for ACP (session-only to avoid persisting provider)
-    let mut typed_overrides: CoreConfigOverrides = CoreConfigOverrides::default();
-    let mut list_models = false;
-    let mut args = env::args_os().skip(1).peekable();
-    while let Some(a) = args.next() {
-        if a == "--acp" || a == "--ACP" {
-            has_acp = true;
-            continue;
-        }
-        // Parse selected CLI flags to config overrides when in ACP mode.
-        if a == "--model"
-            && let Some(v) = args.next()
-        {
-            if has_acp {
-                let s = v.to_string_lossy().into_owned();
-                overrides.push(("model".to_string(), TomlValue::String(s)));
-                continue;
-            }
-            forward.push("--model".into());
-            forward.push(v);
-            continue;
-        }
-        if a == "--oss" || a == "--OSS" {
-            if has_acp {
-                // Use typed override so provider stays session-only; avoid KV that
-                // could be interpreted as persistent.
-                typed_overrides.model_provider =
-                    Some(codex_core::BUILT_IN_OSS_MODEL_PROVIDER_ID.to_string());
-                continue;
-            }
-            forward.push(a);
-            continue;
-        }
-        if a == "--profile"
-            && let Some(v) = args.next()
-        {
-            if has_acp {
-                overrides.push((
-                    "profile".to_string(),
-                    TomlValue::String(v.to_string_lossy().into_owned()),
-                ));
-                continue;
-            }
-            forward.push("--profile".into());
-            forward.push(v);
-            continue;
-        }
-        if (a == "--cwd" || a == "-C")
-            && let Some(v) = args.next()
-        {
-            if has_acp {
-                overrides.push((
-                    "cwd".to_string(),
-                    TomlValue::String(v.to_string_lossy().into_owned()),
-                ));
-                continue;
-            }
-            forward.push(a);
-            forward.push(v);
-            continue;
-        }
-        if a == "--model-provider"
-            && let Some(v) = args.next()
-        {
-            if has_acp {
-                // Respect explicit model-provider flag via KV override.
-                // (We only special-case --oss for session-only behavior.)
-                overrides.push((
-                    "model_provider".to_string(),
-                    TomlValue::String(v.to_string_lossy().into_owned()),
-                ));
-                continue;
-            }
-            forward.push(a);
-            forward.push(v);
-            continue;
-        }
-        if a == "--model-reasoning-effort"
-            && let Some(v) = args.next()
-        {
-            if has_acp {
-                overrides.push((
-                    "model_reasoning_effort".to_string(),
-                    TomlValue::String(v.to_string_lossy().into_owned()),
-                ));
-                continue;
-            }
-            forward.push(a);
-            forward.push(v);
-            continue;
-        }
-        if a == "--model-reasoning-summary"
-            && let Some(v) = args.next()
-        {
-            if has_acp {
-                overrides.push((
-                    "model_reasoning_summary".to_string(),
-                    TomlValue::String(v.to_string_lossy().into_owned()),
-                ));
-                continue;
-            }
-            forward.push(a);
-            forward.push(v);
-            continue;
-        }
-        if a == "--model-verbosity"
-            && let Some(v) = args.next()
-        {
-            if has_acp {
-                overrides.push((
-                    "model_verbosity".to_string(),
-                    TomlValue::String(v.to_string_lossy().into_owned()),
-                ));
-                continue;
-            }
-            forward.push(a);
-            forward.push(v);
-            continue;
-        }
-        if a == "--hide-agent-reasoning" && has_acp {
-            overrides.push(("hide_agent_reasoning".to_string(), TomlValue::Boolean(true)));
-            continue;
-        }
-        if a == "--show-raw-agent-reasoning" && has_acp {
-            overrides.push((
-                "show_raw_agent_reasoning".to_string(),
-                TomlValue::Boolean(true),
-            ));
-            continue;
-        }
-        if a == "--notify"
-            && let Some(v) = args.next()
-        {
-            if has_acp {
-                // Represent as an array with one element: the program. For advanced cases, use -c notify=[...]
-                overrides.push((
-                    "notify".to_string(),
-                    TomlValue::Array(vec![TomlValue::String(v.to_string_lossy().into_owned())]),
-                ));
-                continue;
-            }
-            forward.push(a);
-            forward.push(v);
-            continue;
-        }
-        if a == "--reasoning"
-            && let Some(v) = args.next()
-        {
-            let vstr = v.to_string_lossy().to_lowercase();
-            if has_acp {
-                match vstr.as_str() {
-                    "hidden" => {
-                        overrides
-                            .push(("hide_agent_reasoning".to_string(), TomlValue::Boolean(true)));
-                        overrides.push((
-                            "show_raw_agent_reasoning".to_string(),
-                            TomlValue::Boolean(false),
-                        ));
-                        overrides.push((
-                            "model_reasoning_summary".to_string(),
-                            TomlValue::String("none".into()),
-                        ));
-                    }
-                    "summary" => {
-                        overrides.push((
-                            "hide_agent_reasoning".to_string(),
-                            TomlValue::Boolean(false),
-                        ));
-                        overrides.push((
-                            "show_raw_agent_reasoning".to_string(),
-                            TomlValue::Boolean(false),
-                        ));
-                        overrides.push((
-                            "model_reasoning_summary".to_string(),
-                            TomlValue::String("concise".into()),
-                        ));
-                    }
-                    "raw" => {
-                        overrides.push((
-                            "hide_agent_reasoning".to_string(),
-                            TomlValue::Boolean(false),
-                        ));
-                        overrides.push((
-                            "show_raw_agent_reasoning".to_string(),
-                            TomlValue::Boolean(true),
-                        ));
-                    }
-                    _ => {}
-                }
-                continue;
-            }
-            forward.push(a);
-            forward.push(v);
-            continue;
-        }
-        if a == "--sandbox"
-            && let Some(v) = args.next()
-        {
-            if has_acp {
-                overrides.push((
-                    "sandbox_mode".to_string(),
-                    TomlValue::String(v.to_string_lossy().into_owned()),
-                ));
-                continue;
-            }
-            forward.push("--sandbox".into());
-            forward.push(v);
-            continue;
-        }
-        if a == "--ask-for-approval"
-            && let Some(v) = args.next()
-        {
-            if has_acp {
-                overrides.push((
-                    "approval_policy".to_string(),
-                    TomlValue::String(v.to_string_lossy().into_owned()),
-                ));
-                continue;
-            }
-            forward.push("--ask-for-approval".into());
-            forward.push(v);
-            continue;
-        }
-        if a == "--dangerously-bypass-approvals-and-sandbox" && has_acp {
-            overrides.push((
-                "approval_policy".to_string(),
-                TomlValue::String("never".into()),
-            ));
-            overrides.push((
-                "sandbox_mode".to_string(),
-                TomlValue::String("danger-full-access".into()),
-            ));
-            continue;
-        }
-        if (a == "--search" || a == "--web-search") && has_acp {
-            // tools.web_search = true
-            let mut tools: TomlMap<String, TomlValue> = TomlMap::new();
-            tools.insert("web_search".to_string(), TomlValue::Boolean(true));
-            overrides.push(("tools".to_string(), TomlValue::Table(tools)));
-            continue;
-        }
-        if a == "--list-models" {
-            list_models = true;
-            continue;
-        }
-        if (a == "-c" || a == "--config")
-            && let Some(kv) = args.next()
-        {
-            if has_acp {
-                let s = kv.to_string_lossy();
-                if let Some(eq) = s.find('=') {
-                    let (k, vraw) = s.split_at(eq);
-                    let vraw = &vraw[1..];
-                    let val = toml::from_str::<TomlValue>(vraw)
-                        .unwrap_or_else(|_| TomlValue::String(vraw.to_string()));
-                    overrides.push((k.to_string(), val));
-                    continue;
-                }
-            }
-            forward.push(a);
-            forward.push(kv);
-            continue;
-        }
-        // Default: accumulate for upstream
-        forward.push(a);
+    // Legacy flags fallback
+    if cli.acp {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().enable_io().build().context("tokio runtime for ACP stdio")?;
+        return rt.block_on(async move { codex_acp::run_stdio_with_overrides(Vec::new(), CoreConfigOverrides::default()).await });
     }
+    if cli.list_models { list_models(vec![("model_provider".into(), TomlValue::String("oss".into()))])?; return Ok(()); }
 
-    if has_acp {
-        // Run ACP with both KV and typed overrides (session-only provider).
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .enable_io()
-            .build()
-            .context("tokio runtime for ACP stdio")?;
-        return rt.block_on(async move {
-            codex_acp::run_stdio_with_overrides(overrides, typed_overrides).await
-        });
-    }
+    // Default: embedded CLI
+    run_embedded_cli(&cli.forward)
+}
 
-    // If user asked for help, print upstream help and inject our extra flag.
-    let has_help = forward.iter().any(|a| a == "--help" || a == "-h");
-    if has_help {
-        let output = Command::new("codex")
-            .arg("--help")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .output()
-            .context("invoke upstream codex --help")?;
-        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-        let injection = "      --acp, --ACP  Run ACP stdio server (codex-agentic)\n";
-        if let Some(pos) = text.find("Options:") {
-            if let Some(nl) = text[pos..].find('\n') {
-                let ins = pos + nl + 1;
-                text.insert_str(ins, injection);
-            } else {
-                text.push_str("\nAdditional option (codex-agentic):\n");
-                text.push_str(injection);
-            }
-        } else if let Some(pos) = text.find("Flags:") {
-            if let Some(nl) = text[pos..].find('\n') {
-                let ins = pos + nl + 1;
-                text.insert_str(ins, injection);
-            } else {
-                text.push_str("\nAdditional option (codex-agentic):\n");
-                text.push_str(injection);
-            }
+fn list_models(kv_overrides: Vec<(String, TomlValue)>) -> Result<()> {
+    let cfg = codex_core::config::Config::load_with_cli_overrides(kv_overrides, CoreConfigOverrides::default()).context("load config for models list")?;
+    if cfg.model_provider_id != "oss" { eprintln!("models list currently supports --oss (Ollama) provider only."); return Ok(()); }
+    let rt = tokio::runtime::Builder::new_current_thread().enable_time().enable_io().build().context("tokio runtime for models list")?;
+    rt.block_on(async move {
+        match codex_ollama::OllamaClient::try_from_oss_provider(&cfg).await {
+            Ok(client) => match client.fetch_models().await {
+                Ok(models) => for m in models { println!("{}", m); },
+                Err(e) => eprintln!("error: failed to fetch models: {}", e),
+            },
+            Err(e) => eprintln!("error: {}", e),
+        }
+    });
+    Ok(())
+}
+
+fn run_embedded_cli(args: &Vec<OsString>) -> Result<()> {
+    // Configure upgrade banner to point to our repo/README
+    unsafe { std::env::set_var("CODEX_CURRENT_VERSION", env!("CARGO_PKG_VERSION")); }
+    let repo = std::env::var("CODEX_AGENTIC_UPDATE_REPO").ok()
+        .or_else(|| { let url = env!("CARGO_PKG_REPOSITORY"); extract_repo_slug(url) })
+        .or_else(|| std::env::var("GITHUB_REPOSITORY").ok());
+    if std::env::var("CODEX_UPDATE_LATEST_URL").is_err() {
+        if let Some(r) = &repo {
+            unsafe { std::env::set_var("CODEX_UPDATE_LATEST_URL", format!("https://api.github.com/repos/{r}/releases/latest")); }
         } else {
-            text.push_str("\nAdditional option (codex-agentic):\n");
-            text.push_str(injection);
+            unsafe { std::env::set_var("CODEX_DISABLE_UPDATE_CHECK", "1"); }
         }
-        let mut stdout = io::stdout();
-        stdout.write_all(text.as_bytes())?;
-        stdout.flush()?;
-        return Ok(());
     }
+    if std::env::var("CODEX_UPGRADE_URL").is_err() {
+        if let Some(r) = &repo { unsafe { std::env::set_var("CODEX_UPGRADE_URL", format!("https://github.com/{r}")); } }
+    }
+    if let Ok(cmd) = std::env::var("CODEX_AGENTIC_UPGRADE_CMD") { unsafe { std::env::set_var("CODEX_UPGRADE_CMD", cmd); } }
 
-    // Handle our optional local helper: --list-models (CLI path).
-    if list_models {
-        // Load config with collected overrides and query OSS if configured.
-        let config = codex_core::config::Config::load_with_cli_overrides(
-            overrides.clone(),
-            codex_core::config::ConfigOverrides::default(),
-        )
-        .context("load config for --list-models")?;
-        if config.model_provider_id == "oss" {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_time()
-                .enable_io()
-                .build()
-                .context("tokio runtime for --list-models")?;
-            rt.block_on(async move {
-                match codex_ollama::OllamaClient::try_from_oss_provider(&config).await {
-                    Ok(client) => match client.fetch_models().await {
-                        Ok(models) => {
-                            for m in models {
-                                println!("{}", m);
-                            }
-                        }
-                        Err(e) => eprintln!("error: failed to fetch models: {}", e),
-                    },
-                    Err(e) => eprintln!("error: {}", e),
-                }
-            });
-            return Ok(());
+    // Handle the resume command specially
+    let cli = if args.get(0).and_then(|s| s.to_str()) == Some("resume") {
+        // Parse without the "resume" argument first
+        let remaining_args = if args.len() > 1 { &args[1..] } else { &[] };
+        let mut cli = codex_tui::Cli::parse_from(
+            std::iter::once(OsString::from("codex-agentic"))
+                .chain(remaining_args.iter().cloned())
+        );
+
+        // Check for resume options
+        if remaining_args.is_empty() {
+            // No arguments after resume means picker
+            cli.resume_picker = true;
+        } else if remaining_args.get(0).and_then(|s| s.to_str()) == Some("--last") {
+            cli.resume_last = true;
         } else {
-            eprintln!("--list-models currently supports --oss (Ollama) provider only.");
-            return Ok(());
+            // Assume it's a session ID
+            cli.resume_session_id = remaining_args.get(0).and_then(|s| s.to_str()).map(String::from);
         }
-    }
+        cli
+    } else {
+        codex_tui::Cli::parse_from(std::iter::once(OsString::from("codex-agentic")).chain(args.clone()))
+    };
 
-    // Default: run our embedded TUI (patched to include OSS models in /model picker)
-    let cli =
-        codex_tui::Cli::parse_from(std::iter::once(OsString::from("codex-agentic")).chain(forward));
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_io()
-        .enable_time()
-        .build()?;
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_io().enable_time().build()?;
     rt.block_on(async move {
         let _ = codex_tui::run_main(cli, None).await;
         Ok(())
     })
+}
+
+fn extract_repo_slug(url: &str) -> Option<String> {
+    let prefix = "https://github.com/";
+    if let Some(path) = url.strip_prefix(prefix) {
+        let slug = path.trim_end_matches('/').trim_end_matches(".git").split('/').take(2).collect::<Vec<_>>().join("/");
+        if slug.split('/').count() == 2 { return Some(slug); }
+    }
+    None
+}
+
+fn print_recipes() {
+    const RECIPES: &str = r#"
+Quick Recipes
+=============
+
+1) Pick a model + medium effort
+   codex-agentic acp --model gpt-4o-mini --model-reasoning-effort medium
+
+2) Use local Ollama provider + model
+   codex-agentic acp --oss -c model=\"qwq:latest\"
+
+3) Safer auto-exec in workspace (no prompts on success)
+   codex-agentic acp -c ask_for_approval=\"on-failure\" -c sandbox_mode=\"workspace-write\"
+
+4) Hide reasoning completely
+   codex-agentic acp -c model_reasoning_summary=\"none\" -c hide_agent_reasoning=true
+
+5) Set working directory
+   codex-agentic acp -c cwd=\"/path/to/project\"
+
+6) YOLO mode with search (DANGEROUS: no approvals, no sandbox)
+   codex-agentic acp --yolo-with-search
+
+7) See full upstream CLI commands
+   codex-agentic cli -- --help
+
+Hint
+ -c/--config accepts key=value (JSON parsed when possible). Repeat -c to set multiple values.
+ Prefer first-class flags when available: --model, --oss, --profile, --cwd, --model-reasoning-effort, etc.
+"#;
+    println!("{}", RECIPES);
 }

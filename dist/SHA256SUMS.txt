@@ -1,0 +1,1 @@
+a5ea213afa0347a60dd5b464283dced39a2e51e10449fc6f97b96b8e1e69cfa2  codex-agentic-v0.1.5-macos-arm64.tar.gz
