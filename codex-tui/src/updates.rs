@@ -121,7 +121,10 @@ struct ParsedVersion {
 
 fn parse_version(v: &str) -> Option<ParsedVersion> {
     let v = v.trim();
-    let (core, suffix) = v.split_once('-').map(|(a, b)| (a, Some(b))).unwrap_or((v, None));
+    let (core, suffix) = v
+        .split_once('-')
+        .map(|(a, b)| (a, Some(b)))
+        .unwrap_or((v, None));
     let mut iter = core.split('.');
     let maj = iter.next()?.parse::<u64>().ok()?;
     let min = iter.next()?.parse::<u64>().ok()?;
@@ -157,7 +160,12 @@ fn normalize_tag_name(tag: &str) -> Option<&str> {
         Some(s)
     } else if let Some(s) = tag.strip_prefix('v') {
         Some(s)
-    } else if tag.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+    } else if tag
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_digit())
+        .unwrap_or(false)
+    {
         Some(tag)
     } else {
         None
@@ -190,7 +198,10 @@ mod tests {
 
     #[test]
     fn whitespace_is_ignored() {
-        assert_eq!(parse_version(" 1.2.3 \n").map(|p| (p.maj, p.min, p.pat)), Some((1, 2, 3)));
+        assert_eq!(
+            parse_version(" 1.2.3 \n").map(|p| (p.maj, p.min, p.pat)),
+            Some((1, 2, 3))
+        );
         assert_eq!(is_newer(" 1.2.3 ", "1.2.2"), Some(true));
     }
 
