@@ -16,6 +16,8 @@ jobs:
       CODEX_AGENTIC_UPDATE_REPO: ${{ github.repository }}
       CODEX_AGENTIC_UPGRADE_CMD: bash <(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh)
       CODEX_UPGRADE_URL: https://github.com/${{ github.repository }}
+      # Make cargo more tolerant of flaky networks on GH runners
+      CARGO_NET_RETRY: 10
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +32,16 @@ jobs:
         with:
           toolchain: 1.89.0
           components: rustfmt, clippy
+
+      - name: Ensure toolchain installed (retry)
+        shell: bash
+        run: |
+          set -e
+          for i in 1 2 3 4 5; do
+            rustup toolchain install 1.89.0 -c rustfmt -c clippy --profile minimal && break || true
+            echo "rustup install failed (attempt $i); retrying..."
+            sleep $((i*10))
+          done
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

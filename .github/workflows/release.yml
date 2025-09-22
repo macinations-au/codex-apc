@@ -15,6 +15,9 @@ jobs:
     name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     env:
+      # Cargo network retries for flaky runner networks
+      CARGO_NET_RETRY: 10
+    env:
       # Configure upgrade banner defaults in released binaries at runtime.
       # The banner reads these at process start (not compile time).
       CODEX_AGENTIC_UPDATE_REPO: ${{ github.repository }}
@@ -36,6 +39,16 @@ jobs:
         with:
           toolchain: 1.89.0
           components: rustfmt, clippy
+
+      - name: Ensure toolchain installed (retry)
+        shell: bash
+        run: |
+          set -e
+          for i in 1 2 3 4 5; do
+            rustup toolchain install 1.89.0 -c rustfmt -c clippy --profile minimal && break || true
+            echo "rustup install failed (attempt $i); retrying..."
+            sleep $((i*10))
+          done
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
