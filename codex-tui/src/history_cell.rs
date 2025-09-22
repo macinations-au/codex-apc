@@ -134,6 +134,7 @@ impl HistoryCell for UserHistoryCell {
 
 #[derive(Debug)]
 pub(crate) struct ReasoningSummaryCell {
+    #[allow(dead_code)]
     header: Vec<Line<'static>>,
     content: Vec<Line<'static>>,
     collapsed: std::sync::atomic::AtomicBool,
@@ -177,7 +178,7 @@ impl HistoryCell for ReasoningSummaryCell {
         }
 
         // Expanded view: show a header line and the wrapped summary body.
-        let mut header_line = vec!["▼".magenta().bold(), " ".into(), "thinking".magenta().bold()];
+        let header_line = vec!["▼".magenta().bold(), " ".into(), "thinking".magenta().bold()];
         out.push(Line::from(header_line));
         {
             let summary_lines = self
