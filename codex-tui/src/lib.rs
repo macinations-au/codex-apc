@@ -626,7 +626,10 @@ mod tests {
 
         // Ensure tests default to an OpenAI-like provider that requires auth,
         // so rollout prompt logic behaves deterministically.
-        if let Some(p) = codex_core::built_in_model_providers().get("openai").cloned() {
+        if let Some(p) = codex_core::built_in_model_providers()
+            .get("openai")
+            .cloned()
+        {
             cfg.model_provider_id = "openai".to_string();
             cfg.model_provider = p;
         }

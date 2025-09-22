@@ -159,9 +159,7 @@ impl ReasoningSummaryCell {
 impl HistoryCell for ReasoningSummaryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut out: Vec<Line<'static>> = Vec::new();
-        let collapsed = self
-            .collapsed
-            .load(std::sync::atomic::Ordering::Relaxed);
+        let collapsed = self.collapsed.load(std::sync::atomic::Ordering::Relaxed);
 
         if collapsed {
             // Collapsed view: show a single bullet line with the first summary line content.
@@ -178,7 +176,11 @@ impl HistoryCell for ReasoningSummaryCell {
         }
 
         // Expanded view: show a header line and the wrapped summary body.
-        let header_line = vec!["▼".magenta().bold(), " ".into(), "thinking".magenta().bold()];
+        let header_line = vec![
+            "▼".magenta().bold(),
+            " ".into(),
+            "thinking".magenta().bold(),
+        ];
         out.push(Line::from(header_line));
         {
             let summary_lines = self

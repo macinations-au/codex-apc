@@ -221,13 +221,8 @@ impl App {
         let model = self.config.model.clone();
         let effort = self.config.model_reasoning_effort;
         tokio::spawn(async move {
-            let _ = persist_model_without_provider(
-                &codex_home,
-                profile.as_deref(),
-                &model,
-                effort,
-            )
-            .await;
+            let _ = persist_model_without_provider(&codex_home, profile.as_deref(), &model, effort)
+                .await;
         });
     }
 
