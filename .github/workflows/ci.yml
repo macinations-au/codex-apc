@@ -27,21 +27,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust toolchain
+      - name: Setup Rust (use preinstalled stable)
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.89.0
+          toolchain: stable
           components: rustfmt, clippy
-
-      - name: Ensure toolchain installed (retry)
-        shell: bash
-        run: |
-          set -e
-          for i in 1 2 3 4 5; do
-            rustup toolchain install 1.89.0 -c rustfmt -c clippy --profile minimal && break || true
-            echo "rustup install failed (attempt $i); retrying..."
-            sleep $((i*10))
-          done
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
