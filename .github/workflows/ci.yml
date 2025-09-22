@@ -32,23 +32,29 @@ jobs:
             codex-acp -> target
 
       - name: Build (debug)
-        working-directory: codex-acp
+        working-directory: codex-agentic
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: true
         run: |
           rustc --version
           cargo build
 
-      - name: Format check
+      - name: Format check (codex-acp)
         working-directory: codex-acp
         run: cargo fmt --all -- --check
+      - name: Format check (codex-agentic)
+        working-directory: codex-agentic
+        run: cargo fmt --all -- --check
 
-      - name: Clippy
+      - name: Clippy (codex-acp)
         working-directory: codex-acp
+        run: cargo clippy -- -D warnings
+      - name: Clippy (codex-agentic)
+        working-directory: codex-agentic
         run: cargo clippy -- -D warnings
 
       - name: Test
-        working-directory: codex-acp
+        working-directory: codex-agentic
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: true
         run: cargo test --all

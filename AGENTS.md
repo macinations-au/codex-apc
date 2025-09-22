@@ -27,19 +27,19 @@ This project publishes binaries via GitHub Actions when a semver tag is pushed (
 
 - Workflow files: `.github/workflows/release.yml` and `.github/workflows/ci.yml`.
 - Targets (Release): `ubuntu-latest`, `macos-14`.
-- Artifacts: `codex-acp-vX.Y.Z-<os>-<arch>.tar.gz` and `SHA256SUMS.txt`.
+- Artifact: `codex-agentic-vX.Y.Z-<os>-<arch>.tar.gz` and `SHA256SUMS.txt`.
 
 Steps to cut a release
 ```bash
 # 1) Bump crate version
-sed -i '' -e 's/^version = ".*"/version = "0.1.4"/' codex-acp/Cargo.toml
+sed -i '' -e 's/^version = ".*"/version = "0.1.4"/' codex-agentic/Cargo.toml
 
-# 2) Build and lint locally
-(cd codex-acp && cargo clippy -- -D warnings && cargo build --release)
+# 2) Build and lint locally (single binary)
+(cd codex-agentic && cargo fmt --all && cargo clippy -- -D warnings && cargo build --release)
 
 # 3) Commit + tag + push
-git add codex-acp/Cargo.toml
-git commit -m "release(codex-acp): bump version to v0.1.4"
+git add codex-agentic/Cargo.toml
+git commit -m "release(codex-agentic): bump version to v0.1.4"
 git push origin main
 
 git tag -a v0.1.4 -m "v0.1.4"
@@ -78,16 +78,15 @@ git push -f origin v0.1.4
 ```
 
 ## Installer & Lockstep Launcher
-- Installer: `scripts/install.sh` downloads the latest (or specified) release and installs the `codex-acp` binary to `~/.cargo/bin`.
-- Launcher: `scripts/codex-acp.sh` always runs the freshest repo build and automatically syncs `~/.cargo/bin/codex-acp` to match, keeping editor integrations in lockstep.
+- Installer: `scripts/install.sh` downloads the latest (or specified) release and installs the `codex-agentic` binary to `~/.cargo/bin`.
+- Launcher: `scripts/codex-agentic.sh` runs the freshest repo build and syncs `~/.cargo/bin/codex-agentic` to match, keeping editor integrations in lockstep.
 
 ## Useful Commands
 ```bash
-# Build & test locally
-(cd codex-acp && make fmt && make clippy && make test && make release)
+# Build & test locally (single binary)
+(cd codex-agentic && cargo fmt --all && cargo clippy -- -D warnings && cargo test && cargo build --release)
 
 # Verify installed vs local build
-which -a codex-acp
-ls -lh ~/.cargo/bin/codex-acp codex-acp/target/release/codex-acp
+which -a codex-agentic
+ls -lh ~/.cargo/bin/codex-agentic codex-agentic/target/release/codex-agentic
 ```
-

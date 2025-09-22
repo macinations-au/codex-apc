@@ -12,8 +12,9 @@ rust-version = "1.89"
 agent-client-protocol = { version = "0.4.0" }
 anyhow = { version = "1" }
 async-trait = { version = "0.1" }
-codex-cli = { git = "https://github.com/openai/codex" }
-codex-core = { git = "https://github.com/openai/codex" }
+codex-cli = { git = "https://github.com/openai/codex", rev = "0269096229e8c8bd95185173706807dc10838c7a" }
+codex-core = { git = "https://github.com/openai/codex", rev = "0269096229e8c8bd95185173706807dc10838c7a" }
+codex-ollama = { git = "https://github.com/openai/codex", package = "codex-ollama", rev = "0269096229e8c8bd95185173706807dc10838c7a" }
 tokio = { version = "1.47.1", features = [
   "macros",
   "rt",
@@ -30,3 +31,4 @@ serde_json = { version = "1.0.145", features = ["raw_value"] }
 tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1" }
+toml = "0.9"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Simple installer for codex-acp from GitHub Releases.
+# Simple installer for codex-agentic from GitHub Releases.
 #
 # Usage examples:
 #   REPO=ORG/REPO bash scripts/install.sh
@@ -12,6 +12,7 @@ REPO="${REPO:-macinations-au/codex-apc}"
 VERSION="${VERSION:-latest}"
 BIN_DIR="${BIN_DIR:-}"
 DRY_RUN=0
+BIN_NAME="${BIN_NAME:-codex-agentic}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -28,7 +29,7 @@ while [[ $# -gt 0 ]]; do
 Usage: $0 --repo ORG/REPO [--version vX.Y.Z] [--bin-dir DIR] [--dry-run]
 
 Environment variables:
-  REPO, VERSION, BIN_DIR mirror the flags above.
+  REPO, VERSION, BIN_DIR, BIN_NAME mirror the flags above.
 EOF
       exit 0 ;;
     *) echo "Unknown arg: $1" >&2; exit 2 ;;
@@ -82,7 +83,7 @@ else
   tag="$VERSION"
 fi
 
-name_regex="codex-acp-${tag}-${os}-${arch}\\.tar\\.gz"
+name_regex="${BIN_NAME}-${tag}-${os}-${arch}\\.tar\\.gz"
 asset_url=$(printf '%s' "$json" | awk -v re="$name_regex" -F '"' '$2=="browser_download_url" && $4 ~ re {print $4; exit}')
 
 if [[ -z "$asset_url" ]]; then
@@ -99,25 +100,25 @@ trap 'rm -rf "$work"' EXIT
 curl -fsSL "$asset_url" -o "$work/pkg.tgz"
 tar -C "$work" -xzf "$work/pkg.tgz"
 
-if [[ ! -f "$work/codex-acp" ]]; then
-  echo "error: extracted tarball missing codex-acp binary" >&2
+if [[ ! -f "$work/$BIN_NAME" ]]; then
+  echo "error: extracted tarball missing $BIN_NAME binary" >&2
   exit 1
 fi
 
-dest="$BIN_DIR/codex-acp"
+dest="$BIN_DIR/$BIN_NAME"
 echo "Installing to: $dest" >&2
 
 if [[ $DRY_RUN -eq 1 ]]; then
-  echo "[dry-run] would install $work/codex-acp -> $dest" >&2
+  echo "[dry-run] would install $work/$BIN_NAME -> $dest" >&2
   exit 0
 fi
 
 if [[ -w "$BIN_DIR" ]]; then
-  install -m 0755 "$work/codex-acp" "$dest"
+  install -m 0755 "$work/$BIN_NAME" "$dest"
 else
   echo "Elevating privileges to write $BIN_DIR" >&2
-  sudo install -m 0755 "$work/codex-acp" "$dest"
+  sudo install -m 0755 "$work/$BIN_NAME" "$dest"
 fi
 
-echo "Installed $("$dest" --version 2>/dev/null || echo codex-acp)." >&2
+echo "Installed $("$dest" --version 2>/dev/null || echo $BIN_NAME)." >&2
 echo "Done." >&2

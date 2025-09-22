@@ -250,18 +250,27 @@ impl Agent for CodexAgent {
             },
         );
 
-        // Immediately print status and version to the client in Markdown.
+        // Print status + version asynchronously right after session creation
+        // to avoid racing with NewSessionResponse delivery.
         {
             let sid_str = session_id.to_string();
-            let status = self.render_status(&sid_str).await;
-            let intro = format!(
-                "## Codex ACP\n- Version: `{}`\n\n{}",
-                env!("CARGO_PKG_VERSION"),
-                status
-            );
-            let (tx, rx) = oneshot::channel();
-            self.send_message_chunk(&SessionId(sid_str.clone().into()), intro.into(), tx)?;
-            let _ = rx.await;
+            let tx_updates = self.session_update_tx.clone();
+            // Precompute strings before moving into the task to avoid borrowing self.
+            let intro_header = format!("## Codex ACP\n- Version: `{}`\n\n", env!("CARGO_PKG_VERSION"));
+            let status_string = self.render_status(&sid_str).await;
+            task::spawn_local(async move {
+                let intro = format!("{}{}", intro_header, status_string);
+                let (tx, rx) = oneshot::channel();
+                let _ = tx_updates.send((
+                    SessionNotification {
+                        session_id: SessionId(sid_str.into()),
+                        update: SessionUpdate::AgentMessageChunk { content: intro.into() },
+                        meta: None,
+                    },
+                    tx,
+                ));
+                let _ = rx.await;
+            });
         }
 
         // Advertise available slash commands to the client right after
@@ -503,6 +512,28 @@ impl Agent for CodexAgent {
                     SessionNotification {
                         session_id: session_id_for_update,
                         update: SessionUpdate::AvailableCommandsUpdate { available_commands },
+                        meta: None,
+                    },
+                    tx,
+                ));
+                let _ = rx.await;
+            });
+        }
+
+        // Send status + version banner on load as well (async).
+        {
+            let sid = args.session_id.clone();
+            let sid_str = sid.0.to_string();
+            let tx_updates = self.session_update_tx.clone();
+            let intro_header = format!("## Codex ACP\n- Version: `{}`\n\n", env!("CARGO_PKG_VERSION"));
+            let status_string = self.render_status(&sid_str).await;
+            task::spawn_local(async move {
+                let intro = format!("{}{}", intro_header, status_string);
+                let (tx, rx) = oneshot::channel();
+                let _ = tx_updates.send((
+                    SessionNotification {
+                        session_id: sid,
+                        update: SessionUpdate::AgentMessageChunk { content: intro.into() },
                         meta: None,
                     },
                     tx,

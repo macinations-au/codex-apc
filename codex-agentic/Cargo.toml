@@ -1,0 +1,21 @@
+[package]
+name = "codex-agentic"
+version = "0.1.0"
+edition = "2024"
+description = "Combined launcher: upstream Codex CLI by default, ACP mode with --acp"
+
+[dependencies]
+anyhow = "1"
+codex-acp = { path = "../codex-acp" }
+toml = "0.9"
+codex-core = { git = "https://github.com/openai/codex", rev = "0269096229e8c8bd95185173706807dc10838c7a" }
+codex-ollama = { git = "https://github.com/openai/codex", package = "codex-ollama", rev = "0269096229e8c8bd95185173706807dc10838c7a" }
+tokio = { version = "1.47.1", features = ["rt","time","io-std","io-util"] }
+codex-tui = { path = "../codex-tui" }
+clap = { version = "4", features = ["derive"] }
+
+[features]
+default = []
+# If upstream exposes a public library API for the CLI, we can enable this
+# and call into it directly rather than exec'ing an external binary.
+embed_upstream_cli = []

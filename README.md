@@ -12,23 +12,55 @@ An Agent Client Protocol (ACP) agent that bridges the OpenAI Codex runtime to AC
 
 
 Contents
-- `codex-acp/` — Rust ACP agent (primary deliverable)
-- `scripts/` — helper scripts (`install.sh`, `codex-acp.sh`)
+- `codex-acp/` — ACP agent library (used by the launcher for `--acp`)
+- `codex-agentic/` — Single binary launcher (CLI by default; `--acp` for ACP)
+- `scripts/` — helper scripts (`install.sh`)
 
 Install
 -------
 
-- One‑liner (defaults to this repo; installs the latest GitHub Release):
+- One‑liner (installs latest codex-agentic):
   - `bash <(curl -fsSL https://raw.githubusercontent.com/macinations-au/codex-apc/main/scripts/install.sh)`
 - From source (local build):
-  - `cargo install --path codex-acp --force`
+  - `cargo install --path codex-agentic --force`
 
 Run
 ---
 
-- Recommended launcher (keeps installed binary in lockstep with the freshest local build):
-  - `./scripts/codex-acp.sh`
-  - The script syncs `~/.cargo/bin/codex-acp` to the newest repo build on each run.
+- `codex-agentic` defaults to the CLI and supports `--acp` for ACP:
+
+```bash
+# CLI (upstream) mode
+codex-agentic [upstream-cli-args]
+
+# ACP mode (for IDEs)
+codex-agentic --acp
+```
+
+Key features in this distribution
+- Single binary: CLI by default; pass `--acp` to run as an ACP server in IDEs.
+- Reasoning view control for both modes: `--reasoning hidden|summary|raw`.
+- CLI model picker shows local Ollama models; picks persist (provider+model).
+- No default heavy model is auto‑pulled in OSS mode.
+
+Examples
+- Minimal CLI session
+  - `codex-agentic`
+  - Type `/model` → pick an OpenAI or Ollama model
+  - Type `/status` to confirm
+
+- Use Ollama models (no flags needed after first pick)
+  - `codex-agentic`
+  - `/model` → choose `qwq:latest`
+  - Provider switches to `oss` and the choice is saved; future runs reuse it
+
+- Collapse “thinking”
+  - `codex-agentic --reasoning summary`
+  - In the transcript, “Thinking” shows with a chevron (▶). Press `r` to expand/collapse.
+
+- ACP server for IDEs (e.g., Zed)
+  - `codex-agentic --acp --reasoning summary`
+  - In the IDE, use `/reasoning hidden|summary|raw` to change mid‑session
 
 Zed Integration
 ---------------
@@ -38,27 +70,33 @@ Example (two entries: repo launcher and the installed binary):
 ```json
 "agent_servers": {
   "Codex": {
-    "command": "/Users/<you>/workspace/codex-apc/scripts/codex-acp.sh",
+    "command": "/Users/<you>/workspace/codex-apc/scripts/codex-agentic.sh",
     "env": { "RUST_LOG": "info" }
   },
   "CodexExec": {
-    "command": "/Users/<you>/.cargo/bin/codex-acp",
+    "command": "/Users/<you>/.cargo/bin/codex-agentic",
     "env": { "RUST_LOG": "info" }
   }
 }
 ```
 
-Slash Commands (built‑ins)
---------------------------
-
-- `/status` — Markdown status (workspace, account, model, tokens)
-- `/init` — create an AGENTS.md template in the workspace
-- `/model <slug>` — set session model
+Slash commands (high‑use)
+-------------------------
+- `/model` — open the model picker; includes local Ollama models; persists provider+model
+- `/status` — workspace/account/model/tokens
 - `/approvals <policy>` — `untrusted | on-request | on-failure | never`
-- `/thoughts on|off` — show/hide reasoning stream (default: off)
+- `/reasoning <hidden|summary|raw>` — collapse or show “thinking”
+- `/init` — scaffold an AGENTS.md in the workspace
 
 Notes
-- Custom prompts under your Codex prompts directory are auto‑discovered and exposed as additional commands.
+- Custom prompts under your Codex prompts directory are auto‑discovered and appear as additional commands.
+
+Screenshots
+-----------
+- Put screenshots in `docs/images/` and reference them here. Suggested shots:
+  - CLI `/model` picker showing Ollama entries
+  - Collapsed “Thinking” chevron (▶) and expanded (▼)
+  - ACP in an IDE with `/reasoning summary`
 
 CI
 --
@@ -74,7 +112,7 @@ Releases
 Development
 -----------
 
-- `cd codex-acp && make build | make release`
+- `cd codex-agentic && cargo build --release`
 - `make fmt && make clippy && make test`
 
 License

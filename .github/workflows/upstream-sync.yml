@@ -1,0 +1,66 @@
+name: Upstream Sync
+
+on:
+  schedule:
+    - cron: '37 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine latest upstream commit
+        id: up
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Default to main branch HEAD of upstream openai/codex
+          owner_repo="openai/codex"
+          ref_json=$(curl -fsSL "https://api.github.com/repos/${owner_repo}/commits/main")
+          sha=$(printf '%s' "$ref_json" | jq -r .sha)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.89.0
+
+      - name: Bump git deps to upstream rev
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="${{ steps.up.outputs.sha }}"
+          echo "Using upstream openai/codex @ $sha"
+          # Update both crates that point to the repo (if present)
+          (cd codex-acp && cargo update -p codex-core --precise "$sha" || true)
+          (cd codex-acp && cargo update -p codex-cli  --precise "$sha" || true)
+
+      - name: Build + Test
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd codex-acp && cargo build)
+          (cd codex-acp && cargo test --all)
+
+      - name: Create PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore(upstream): sync openai/codex deps to ${{ steps.up.outputs.sha }}"
+          title: "Sync upstream codex to ${{ steps.up.outputs.sha }}"
+          body: |
+            This automated PR bumps git dependencies (`codex-core`, `codex-cli`) to the latest upstream commit.
+
+            - Upstream: https://github.com/openai/codex/commit/${{ steps.up.outputs.sha }}
+            - Built with Rust 1.89
+
+            If CI is green, merge to keep our distro aligned with parent while preserving our additional features.
+          branch: chore/upstream-sync-${{ steps.up.outputs.sha }}
+          labels: upstream, automation
+
