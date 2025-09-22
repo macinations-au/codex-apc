@@ -36,6 +36,8 @@ jobs:
         with:
           workspaces: |
             codex-acp -> target
+            codex-agentic -> target
+            codex-tui -> target
 
       - name: Build (debug)
         working-directory: codex-agentic
@@ -43,7 +45,7 @@ jobs:
           CARGO_NET_GIT_FETCH_WITH_CLI: true
         run: |
           rustc --version
-          cargo build
+          cargo build -vv | tee ../../ci-build-${{ matrix.os }}.log
 
       - name: Format check (codex-acp)
         working-directory: codex-acp
@@ -59,8 +61,22 @@ jobs:
         working-directory: codex-agentic
         run: cargo clippy -- -D warnings
 
-      - name: Test
+      - name: Test (codex-tui)
+        working-directory: codex-tui
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: true
+        run: cargo test --all
+
+      - name: Test (codex-agentic)
         working-directory: codex-agentic
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: true
         run: cargo test --all
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-build-log-${{ matrix.os }}
+          path: ci-build-*.log
+          if-no-files-found: ignore

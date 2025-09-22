@@ -42,6 +42,8 @@ jobs:
         with:
           workspaces: |
             codex-acp -> target
+            codex-agentic -> target
+            codex-tui -> target
 
       - name: Build (release)
         working-directory: codex-agentic
@@ -49,7 +51,7 @@ jobs:
           CARGO_NET_GIT_FETCH_WITH_CLI: true
         run: |
           rustc --version
-          cargo build --release
+          cargo build --release -vv | tee ../../release-build-${{ matrix.os }}.log
 
       - name: Compute platform identifiers
         id: plat
@@ -85,6 +87,14 @@ jobs:
           name: ${{ matrix.os }}-asset
           path: ${{ steps.pkg.outputs.asset }}
           if-no-files-found: error
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-build-log
+          path: release-build-*.log
+          if-no-files-found: ignore
 
   release:
     name: Publish Release
