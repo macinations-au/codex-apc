@@ -347,6 +347,24 @@ impl App {
                     self.config.model_provider = provider;
                     self.chat_widget
                         .add_info_message(format!("Provider set to {provider_id}"), None);
+                    // Immediately scrub any provider keys that might have been written
+                    // by any config auto-save mechanism
+                    let codex_home = self.config.codex_home.clone();
+                    let profile = self.active_profile.clone();
+                    let model = self.config.model.clone();
+                    let effort = self.config.model_reasoning_effort;
+                    // Run synchronously to ensure it happens before any other operations
+                    let _ = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(async move {
+                            persist_model_without_provider(
+                                &codex_home,
+                                profile.as_deref(),
+                                &model,
+                                effort,
+                            )
+                            .await
+                        })
+                    });
                 } else {
                     self.chat_widget.add_error_message(format!(
                         "Unknown provider id: {provider_id}"
