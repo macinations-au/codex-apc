@@ -263,7 +263,7 @@ fn list_models(kv_overrides: Vec<(String, TomlValue)>) -> Result<()> {
     Ok(())
 }
 
-fn run_embedded_cli(args: &Vec<OsString>) -> Result<()> {
+fn run_embedded_cli(args: &[OsString]) -> Result<()> {
     // Configure upgrade banner to point to our repo/README
     unsafe {
         std::env::set_var("CODEX_CURRENT_VERSION", env!("CARGO_PKG_VERSION"));
@@ -289,11 +289,9 @@ fn run_embedded_cli(args: &Vec<OsString>) -> Result<()> {
             }
         }
     }
-    if std::env::var("CODEX_UPGRADE_URL").is_err() {
-        if let Some(r) = &repo {
-            unsafe {
-                std::env::set_var("CODEX_UPGRADE_URL", format!("https://github.com/{r}"));
-            }
+    if std::env::var("CODEX_UPGRADE_URL").is_err() && let Some(r) = &repo {
+        unsafe {
+            std::env::set_var("CODEX_UPGRADE_URL", format!("https://github.com/{r}"));
         }
     }
     if let Ok(cmd) = std::env::var("CODEX_AGENTIC_UPGRADE_CMD") {
@@ -303,7 +301,7 @@ fn run_embedded_cli(args: &Vec<OsString>) -> Result<()> {
     }
 
     // Handle the resume command specially
-    let cli = if args.get(0).and_then(|s| s.to_str()) == Some("resume") {
+    let cli = if args.first().and_then(|s| s.to_str()) == Some("resume") {
         // Parse without the "resume" argument first
         let remaining_args = if args.len() > 1 { &args[1..] } else { &[] };
         let mut cli = codex_tui::Cli::parse_from(
@@ -314,20 +312,20 @@ fn run_embedded_cli(args: &Vec<OsString>) -> Result<()> {
         if remaining_args.is_empty() {
             // No arguments after resume means picker
             cli.resume_picker = true;
-        } else if remaining_args.get(0).and_then(|s| s.to_str()) == Some("--last") {
+        } else if remaining_args.first().and_then(|s| s.to_str()) == Some("--last") {
             cli.resume_last = true;
         } else {
             // Assume it's a session ID
             cli.resume_session_id = remaining_args
-                .get(0)
+                .first()
                 .and_then(|s| s.to_str())
                 .map(String::from);
         }
         cli
     } else {
-        codex_tui::Cli::parse_from(
-            std::iter::once(OsString::from("codex-agentic")).chain(args.clone()),
-        )
+        codex_tui::Cli::parse_from(std::iter::once(OsString::from("codex-agentic")).chain(
+            args.iter().cloned(),
+        ))
     };
 
     let rt = tokio::runtime::Builder::new_multi_thread()
