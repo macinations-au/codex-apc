@@ -17,7 +17,6 @@ jobs:
     env:
       # Cargo network retries for flaky runner networks
       CARGO_NET_RETRY: 10
-    env:
       # Configure upgrade banner defaults in released binaries at runtime.
       # The banner reads these at process start (not compile time).
       CODEX_AGENTIC_UPDATE_REPO: ${{ github.repository }}
