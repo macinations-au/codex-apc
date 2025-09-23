@@ -166,9 +166,9 @@ impl CodexAgent {
                         p,
                         "Focus on: Architecture, Important Flows, CI/Release, Config & Env, Design Choices, Risks."
                     );
-                    let _ = writeln!(p, "");
+                    let _ = writeln!(p);
                     let _ = writeln!(p, "Workspace: {}", cwd.display());
-                    let _ = writeln!(p, "");
+                    let _ = writeln!(p);
                     let _ = writeln!(p, "Return Markdown with those section headers.");
                     p
                 };
