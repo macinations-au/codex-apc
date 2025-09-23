@@ -44,6 +44,51 @@ impl MarkdownStreamCollector {
         self.buffer.push_str(delta);
     }
 
+    /// Returns true if the internal buffer currently ends with a newline.
+    pub fn ends_with_newline(&self) -> bool {
+        self.buffer.ends_with('\n')
+    }
+
+    /// Returns true if the current buffer state indicates we are inside a fenced
+    /// code block (```), based on a simple line-start toggle scan.
+    pub fn in_code_fence(&self) -> bool {
+        let bytes = self.buffer.as_bytes();
+        let mut in_fence = false;
+        let mut at_line_start = true;
+        let mut i = 0;
+        while i < bytes.len() {
+            if at_line_start && bytes[i..].starts_with(b"```") {
+                in_fence = !in_fence;
+                i += 3;
+                at_line_start = false;
+                continue;
+            }
+            let ch = match self.buffer[i..].chars().next() {
+                Some(c) => c,
+                None => break,
+            };
+            i += ch.len_utf8();
+            if ch == '\n' {
+                at_line_start = true;
+            } else if at_line_start {
+                at_line_start = false;
+            }
+        }
+        in_fence
+    }
+
+    /// Quick check if `next` begins with an ATX heading like `## `.
+    pub fn delta_begins_with_atx_heading(next: &str) -> bool {
+        let bytes = next.as_bytes();
+        let mut i = 0;
+        let mut hashes = 0;
+        while i < bytes.len() && bytes[i] == b'#' && hashes < 6 {
+            hashes += 1;
+            i += 1;
+        }
+        hashes > 0 && i < bytes.len() && bytes[i] == b' '
+    }
+
     /// Render the full buffer and return only the newly completed logical lines
     /// since the last commit. When the buffer does not end with a newline, the
     /// final rendered line is considered incomplete and is not emitted.

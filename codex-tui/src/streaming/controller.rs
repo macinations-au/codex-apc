@@ -89,6 +89,14 @@ impl StreamController {
         if !delta.is_empty() {
             state.has_seen_delta = true;
         }
+        // Insert a blank line if a heading begins immediately after non-newline text
+        // and we are not in a fenced code block.
+        if !state.collector.ends_with_newline()
+            && !state.collector.in_code_fence()
+            && crate::markdown_stream::MarkdownStreamCollector::delta_begins_with_atx_heading(delta)
+        {
+            state.collector.push_delta("\n\n");
+        }
         state.collector.push_delta(delta);
         if delta.contains('\n') {
             let newly_completed = state.collector.commit_complete_lines(&cfg);
