@@ -35,10 +35,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust (use preinstalled stable)
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust (pin 1.89.0 for fmt stability)
+        uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: 1.89.0
           components: rustfmt, clippy
 
       - name: Cache cargo
@@ -61,12 +61,18 @@ jobs:
       - name: Format check (codex-acp)
         working-directory: codex-acp
         run: cargo fmt --all -- --check
+      - name: Format check (codex-tui)
+        working-directory: codex-tui
+        run: cargo fmt --all -- --check
       - name: Format check (codex-agentic)
         working-directory: codex-agentic
         run: cargo fmt --all -- --check
 
       - name: Clippy (codex-acp)
         working-directory: codex-acp
+        run: cargo clippy -- -D warnings
+      - name: Clippy (codex-tui)
+        working-directory: codex-tui
         run: cargo clippy -- -D warnings
       - name: Clippy (codex-agentic)
         working-directory: codex-agentic
@@ -75,6 +81,13 @@ jobs:
       - name: Test (codex-tui)
         if: runner.os != 'Windows'
         working-directory: codex-tui
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: true
+        run: cargo test --all
+
+      - name: Test (codex-acp)
+        if: runner.os != 'Windows'
+        working-directory: codex-acp
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: true
         run: cargo test --all
