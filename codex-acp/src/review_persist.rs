@@ -70,7 +70,7 @@ pub fn update_report_markdown_sync(
     });
     report.generated_at = Utc::now();
     report.model = model;
-    report.report.markdown = markdown.to_string();
+    report.report.markdown = sanitize_markdown_headings(markdown);
 
     let dir = cwd.join(".codex");
     fs::create_dir_all(&dir)?;
@@ -80,4 +80,108 @@ pub fn update_report_markdown_sync(
     fs::write(&tmp_path, &data)?;
     fs::rename(&tmp_path, &final_path)?;
     Ok(())
+}
+
+/// Ensure headings like "## Title" begin on a new line (outside code fences).
+fn sanitize_markdown_headings(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() + 8);
+    let mut in_fence = false;
+    let mut at_line_start = true;
+    let mut i = 0;
+    let bytes = input.as_bytes();
+    while i < bytes.len() {
+        if at_line_start && bytes[i..].starts_with(b"```") {
+            in_fence = !in_fence;
+            out.push_str("```");
+            i += 3;
+            at_line_start = false;
+            continue;
+        }
+        if !in_fence && !at_line_start && bytes[i] == b'#' {
+                let mut j = i;
+                let mut hashes = 0;
+                while j < bytes.len() && bytes[j] == b'#' && hashes < 6 {
+                    hashes += 1;
+                    j += 1;
+                }
+                if hashes > 0 && j < bytes.len() && bytes[j] == b' ' {
+                    if !out.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    out.push('\n');
+                    for _ in 0..hashes {
+                        out.push('#');
+                    }
+                    out.push(' ');
+                    i = j + 1;
+                    at_line_start = false;
+                    continue;
+                }
+        }
+        let ch = input[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+        if ch == '\n' {
+            at_line_start = true;
+        } else if at_line_start {
+            at_line_start = false;
+        }
+    }
+    out
+}
+
+/// Public wrapper to sanitize saved markdown before sending to clients.
+pub fn sanitize_markdown_for_display(input: &str) -> String {
+    sanitize_markdown_headings(input)
+}
+
+/// Return true if `next` starts with an ATX heading like `## `.
+fn next_starts_with_atx_heading(next: &str) -> bool {
+    let bytes = next.as_bytes();
+    let mut i = 0;
+    let mut hashes = 0;
+    while i < bytes.len() && bytes[i] == b'#' && hashes < 6 {
+        hashes += 1;
+        i += 1;
+    }
+    hashes > 0 && i < bytes.len() && bytes[i] == b' '
+}
+
+/// Scan `prev` and return whether we end inside a fenced code block.
+fn in_code_fence_at_end(prev: &str) -> bool {
+    let bytes = prev.as_bytes();
+    let mut in_fence = false;
+    let mut at_line_start = true;
+    let mut i = 0;
+    while i < bytes.len() {
+        if at_line_start && bytes[i..].starts_with(b"```") {
+            in_fence = !in_fence;
+            i += 3;
+            at_line_start = false;
+            continue;
+        }
+        let ch = match prev[i..].chars().next() {
+            Some(c) => c,
+            None => break,
+        };
+        i += ch.len_utf8();
+        if ch == '\n' {
+            at_line_start = true;
+        } else if at_line_start {
+            at_line_start = false;
+        }
+    }
+    in_fence
+}
+
+/// Determine if we should insert a blank line before `next` to ensure a heading
+/// begins on a new line when streaming.
+pub fn needs_newline_before_heading(prev: &str, next: &str) -> bool {
+    if prev.is_empty() || prev.ends_with('\n') {
+        return false;
+    }
+    if in_code_fence_at_end(prev) {
+        return false;
+    }
+    next_starts_with_atx_heading(next)
 }

@@ -110,8 +110,10 @@ pub async fn run_review_codebase(
                     ),
                 )));
             } else {
+                // Ensure headings start on a new line so markdown renders correctly.
+                let sanitized = sanitize_markdown_headings(&prev.report.markdown);
                 let mut rendered: Vec<Line<'static>> = Vec::new();
-                append_markdown(&prev.report.markdown, &mut rendered, &config);
+                append_markdown(&sanitized, &mut rendered, &config);
                 let cell = AgentMessageCell::new(rendered, true);
                 app_tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
             }
@@ -136,6 +138,12 @@ pub async fn run_review_codebase(
                 app_tx.send(AppEvent::InsertHistoryCell(Box::new(
                     history_cell::new_info_event("Update available".to_string(), Some(hint)),
                 )));
+            }
+
+            // Ask ChatWidget to memorize once per session (no-op if already done).
+            if !prev.report.markdown.trim().is_empty() {
+                let sanitized = sanitize_markdown_headings(&prev.report.markdown);
+                app_tx.send(AppEvent::MemorizeReportIfNeeded(sanitized));
             }
             return Ok(());
         }
@@ -178,10 +186,15 @@ pub async fn run_review_codebase(
                 ),
             )));
         } else {
+            // Ensure headings start on a new line so markdown renders correctly.
+            let sanitized = sanitize_markdown_headings(&prev.report.markdown);
             let mut rendered: Vec<Line<'static>> = Vec::new();
-            append_markdown(&prev.report.markdown, &mut rendered, &config);
+            append_markdown(&sanitized, &mut rendered, &config);
             let cell = AgentMessageCell::new(rendered, true);
             app_tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
+            // Ask ChatWidget to memorize once per session (no-op if already done).
+            let sanitized = sanitize_markdown_headings(&prev.report.markdown);
+            app_tx.send(AppEvent::MemorizeReportIfNeeded(sanitized));
         }
         return Ok(());
     }
@@ -587,8 +600,65 @@ pub async fn update_report_markdown(
     if let Some(m) = model {
         report.model = Some(m);
     }
-    report.report.markdown = markdown.to_string();
+    // Sanitize before saving so future renders are clean across UIs.
+    report.report.markdown = sanitize_markdown_headings(markdown);
     save_report_atomic(cwd, &report).await
+}
+
+/// Ensure that ATX headings ("#", "##", …) begin at the start of a line.
+/// This fixes cases where streaming concatenation produces "…sentence.## Heading".
+/// Skips transformations inside fenced code blocks.
+pub(crate) fn sanitize_markdown_headings(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() + 8);
+    let mut in_fence = false;
+    let mut at_line_start = true;
+    let mut i = 0;
+    let bytes = input.as_bytes();
+    while i < bytes.len() {
+        // Detect fenced code block start/end at line start: "```"
+        if at_line_start && bytes[i..].starts_with(b"```") {
+            in_fence = !in_fence;
+            out.push_str("```");
+            i += 3;
+            at_line_start = false;
+            continue;
+        }
+        if !in_fence && !at_line_start {
+            // If we see a heading marker not at line start, inject a blank line before it
+            // and copy the entire heading marker sequence in one go.
+            if bytes[i] == b'#' {
+                let mut j = i;
+                let mut hashes = 0;
+                while j < bytes.len() && bytes[j] == b'#' && hashes < 6 {
+                    hashes += 1;
+                    j += 1;
+                }
+                if hashes > 0 && j < bytes.len() && bytes[j] == b' ' {
+                    if !out.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    out.push('\n');
+                    // Copy the full heading prefix (### + space)
+                    for _ in 0..hashes {
+                        out.push('#');
+                    }
+                    out.push(' ');
+                    i = j + 1; // skip the space as well
+                    at_line_start = false;
+                    continue;
+                }
+            }
+        }
+        let ch = input[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+        if ch == '\n' {
+            at_line_start = true;
+        } else if at_line_start {
+            at_line_start = false;
+        }
+    }
+    out
 }
 
 // ------------------------
@@ -651,5 +721,13 @@ mod tests {
             10_000,
         );
         assert!(prompt.len() <= 10_000);
+    }
+
+    #[test]
+    fn test_sanitize_headings_inserts_newline() {
+        let input = "I'll scan…## Architecture\nDetails";
+        let out = sanitize_markdown_headings(input);
+        eprintln!("OUT=<{out}>");
+        assert!(out.contains("\n\n## Architecture"));
     }
 }

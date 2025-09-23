@@ -47,6 +47,8 @@ struct SessionState {
     show_reasoning: bool,
     current_model: String,
     current_effort: Option<ReasoningEffortConfig>,
+    // Whether this session has already memorized the saved /about-codebase report.
+    about_memorized: bool,
 }
 
 pub struct CodexAgent {
@@ -249,6 +251,7 @@ impl Agent for CodexAgent {
                 show_reasoning: false,
                 current_model: self.config.model.clone(),
                 current_effort: self.config.model_reasoning_effort,
+                about_memorized: false,
             },
         );
 
@@ -263,21 +266,29 @@ impl Agent for CodexAgent {
                 env!("CARGO_PKG_VERSION")
             );
             let status_string = self.render_status(&sid_str).await;
-            task::spawn_local(async move {
-                let intro = format!("{}{}", intro_header, status_string);
-                let (tx, rx) = oneshot::channel();
-                let _ = tx_updates.send((
-                    SessionNotification {
-                        session_id: SessionId(sid_str.into()),
-                        update: SessionUpdate::AgentMessageChunk {
-                            content: intro.into(),
+            task::spawn_local({
+                let sid = sid_str.clone();
+                let tx = tx_updates.clone();
+                async move {
+                    let intro = format!("{}{}", intro_header, status_string);
+                    let (tx1, rx) = oneshot::channel();
+                    let _ = tx.send((
+                        SessionNotification {
+                            session_id: SessionId(sid.into()),
+                            update: SessionUpdate::AgentMessageChunk {
+                                content: intro.into(),
+                            },
+                            meta: None,
                         },
-                        meta: None,
-                    },
-                    tx,
-                ));
-                let _ = rx.await;
+                        tx1,
+                    ));
+                    let _ = rx.await;
+                }
             });
+
+            // Note: startup auto-memorize is disabled in ACP to avoid
+            // competing with conversation event streams. Memorization
+            // occurs on first quick-view instead.
         }
 
         // Advertise available slash commands to the client right after
@@ -301,81 +312,8 @@ impl Agent for CodexAgent {
             });
         }
 
-        // Discover custom prompts and cache as available commands.
-        {
-            let sid_str = session_id.to_string();
-            let tx_updates = self.session_update_tx.clone();
-            let submit_seq = self.next_submit_seq.get();
-            self.next_submit_seq.set(submit_seq + 1);
-            let submit_id = format!("s{}-{}", sid_str, submit_seq);
-            let session_map = self.sessions.borrow();
-            let extra_cache = self.extra_available_commands.clone();
-            if let Some(state) = session_map.get(&sid_str) {
-                let conversation = state.conversation.clone();
-                let session_id_for_update = SessionId(sid_str.clone().into());
-                task::spawn_local(async move {
-                    let Some(conversation) = conversation else {
-                        return;
-                    };
-                    // Request custom prompts
-                    let _ = conversation
-                        .submit_with_id(Submission {
-                            id: submit_id.clone(),
-                            op: Op::ListCustomPrompts,
-                        })
-                        .await;
-                    // Wait for response and then update available commands
-                    loop {
-                        match conversation.next_event().await {
-                            Ok(event) if event.id == submit_id => {
-                                match event.msg {
-                                    EventMsg::ListCustomPromptsResponse(resp) => {
-                                        // Build extra commands from custom prompts and cache them
-                                        let mut extra: Vec<AvailableCommand> = Vec::new();
-                                        for p in resp.custom_prompts {
-                                            let desc =
-                                                format!("custom prompt ({})", p.path.display());
-                                            extra.push(AvailableCommand {
-                                                name: p.name,
-                                                description: desc,
-                                                input: Some(AvailableCommandInput::Unstructured {
-                                                    hint: "Additional input (optional)".into(),
-                                                }),
-                                                meta: None,
-                                            });
-                                        }
-                                        {
-                                            let mut cache = extra_cache.borrow_mut();
-                                            *cache = extra.clone();
-                                        }
-                                        // Merge built-ins + cached extra
-                                        let mut cmds = CodexAgent::built_in_commands();
-                                        cmds.extend(extra);
-                                        let (tx, rx) = oneshot::channel();
-                                        let _ = tx_updates.send((
-                                            SessionNotification {
-                                                session_id: session_id_for_update,
-                                                update: SessionUpdate::AvailableCommandsUpdate {
-                                                    available_commands: cmds,
-                                                },
-                                                meta: None,
-                                            },
-                                            tx,
-                                        ));
-                                        let _ = rx.await;
-                                        break;
-                                    }
-                                    EventMsg::Error(_) => break,
-                                    _ => {}
-                                }
-                            }
-                            Ok(_) => continue,
-                            Err(_) => break,
-                        }
-                    }
-                });
-            }
-        }
+        // Discover custom prompts is disabled for now to avoid competing for
+        // conversation events. Built-in commands remain available.
         Ok(NewSessionResponse {
             session_id: SessionId(session_id.to_string().into()),
             modes: None,
@@ -419,6 +357,7 @@ impl Agent for CodexAgent {
                     show_reasoning: false,
                     current_model: self.config.model.clone(),
                     current_effort: self.config.model_reasoning_effort,
+                    about_memorized: false,
                 },
             );
 

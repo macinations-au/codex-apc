@@ -71,4 +71,9 @@ pub(crate) enum AppEvent {
 
     /// Forwarded conversation history snapshot from the current conversation.
     ConversationHistory(ConversationPathResponseEvent),
+
+    /// Internal: ask ChatWidget to submit a one-off memorize turn for the
+    /// current session using the provided report markdown. If already
+    /// memorized in this session, it is a no-op.
+    MemorizeReportIfNeeded(String),
 }

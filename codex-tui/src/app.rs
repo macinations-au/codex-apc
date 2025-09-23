@@ -300,6 +300,9 @@ impl App {
             AppEvent::ConversationHistory(ev) => {
                 self.on_conversation_history_for_backtrack(tui, ev).await?;
             }
+            AppEvent::MemorizeReportIfNeeded(markdown) => {
+                self.chat_widget.memorize_report_if_needed(markdown);
+            }
             AppEvent::ExitRequest => {
                 return Ok(false);
             }

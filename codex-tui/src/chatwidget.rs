@@ -188,6 +188,12 @@ pub(crate) struct ChatWidget {
     is_review_mode: bool,
     // If true, save the final assistant message of this turn into the about-codebase JSON.
     pending_about_save: bool,
+    // One-off flag: if true, we've already asked the model to memorize the
+    // saved /about-codebase report during this session.
+    about_memorized_in_session: bool,
+    // Background memorize turn state: when true, we suppress normal streaming
+    // and avoid setting the UI into task-running mode.
+    background_memorize_active: bool,
 }
 
 struct UserMessage {
@@ -217,6 +223,22 @@ impl ChatWidget {
         let sink = AppEventHistorySink(self.app_event_tx.clone());
         let _ = self.stream.finalize(true, &sink);
     }
+
+    pub(crate) fn memorize_report_if_needed(&mut self, report_markdown: String) {
+        if self.about_memorized_in_session {
+            return;
+        }
+        self.about_memorized_in_session = true;
+        self.pending_about_save = false; // don't persist the acknowledgement
+        self.background_memorize_active = true; // run turn without blocking UI
+        let mem_prompt = format!(
+            "Please memorize the following codebase report for this session. Do not analyze or restate it. When you are done, reply exactly with: Agent memorised.\n\n--- BEGIN CODEBASE REPORT ---\n{}\n--- END CODEBASE REPORT ---\n",
+            report_markdown
+        );
+        self.app_event_tx.send(AppEvent::CodexOp(Op::UserInput {
+            items: vec![InputItem::Text { text: mem_prompt }],
+        }));
+    }
     // --- Small event handlers ---
     fn on_session_configured(&mut self, event: codex_core::protocol::SessionConfiguredEvent) {
         self.bottom_pane
@@ -238,12 +260,28 @@ impl ChatWidget {
         if let Some(user_message) = self.initial_user_message.take() {
             self.submit_user_message(user_message);
         }
+        // Daisy-chain AGENTS.md read with codebase report memorization once per session.
+        // If a saved report exists, submit a memorize turn now so /about-codebase later just displays.
+        if !self.about_memorized_in_session {
+            let cwd = self.config.cwd.clone();
+            if let Ok(rep) = crate::review_codebase::load_previous_report(&cwd)
+                && !rep.report.markdown.trim().is_empty()
+            {
+                let sanitized =
+                    crate::review_codebase::sanitize_markdown_headings(&rep.report.markdown);
+                self.memorize_report_if_needed(sanitized);
+            }
+        }
         if !self.suppress_session_configured_redraw {
             self.request_redraw();
         }
     }
 
     fn on_agent_message(&mut self, message: String) {
+        if self.background_memorize_active {
+            // Suppress transcript rendering for background memorize.
+            return;
+        }
         let sink = AppEventHistorySink(self.app_event_tx.clone());
         let finished = self.stream.apply_final_answer(&message, &sink);
         self.handle_if_stream_finished(finished);
@@ -251,6 +289,10 @@ impl ChatWidget {
     }
 
     fn on_agent_message_delta(&mut self, delta: String) {
+        if self.background_memorize_active {
+            // Suppress streaming for background memorize.
+            return;
+        }
         self.handle_streaming_delta(delta);
     }
 
@@ -295,8 +337,10 @@ impl ChatWidget {
 
     fn on_task_started(&mut self) {
         self.bottom_pane.clear_ctrl_c_quit_hint();
-        self.bottom_pane.set_task_running(true);
-        self.stream.reset_headers_for_new_turn();
+        if !self.background_memorize_active {
+            self.bottom_pane.set_task_running(true);
+            self.stream.reset_headers_for_new_turn();
+        }
         self.full_reasoning_buffer.clear();
         self.reasoning_buffer.clear();
         self.request_redraw();
@@ -310,20 +354,24 @@ impl ChatWidget {
             let _ = self.stream.finalize(true, &sink);
         }
         // Mark task stopped and request redraw now that all content is in history.
-        self.bottom_pane.set_task_running(false);
+        if !self.background_memorize_active {
+            self.bottom_pane.set_task_running(false);
+        }
         self.running_commands.clear();
         self.request_redraw();
 
         // If there is a queued user message, send exactly one now to begin the next turn.
-        self.maybe_send_next_queued_input();
+        if !self.background_memorize_active {
+            self.maybe_send_next_queued_input();
+        }
         // Emit a notification when the turn completes (suppressed if focused).
         let last_message_for_notify = last_agent_message.clone().unwrap_or_default();
         self.notify(Notification::AgentTurnComplete {
             response: last_message_for_notify,
         });
         // If we were asked to persist the last response as the about-codebase report, do so now.
-        if self.pending_about_save {
-            if let Some(markdown) = last_agent_message {
+        if self.pending_about_save && !self.background_memorize_active {
+            if let Some(markdown) = last_agent_message.clone() {
                 let cwd = self.config.cwd.clone();
                 let model = Some(self.config.model.clone());
                 let tx = self.app_event_tx.clone();
@@ -341,6 +389,17 @@ impl ChatWidget {
                 });
             }
             self.pending_about_save = false;
+        }
+
+        // Show a compact acknowledgement for background memorize turns and clear the flag.
+        if self.background_memorize_active {
+            if let Some(ref text) = last_agent_message {
+                let ack = text.trim();
+                if !ack.is_empty() {
+                    self.add_to_history(history_cell::new_review_status_line(ack.to_string()))
+                }
+            }
+            self.background_memorize_active = false;
         }
     }
 
@@ -797,6 +856,8 @@ impl ChatWidget {
             pending_notification: None,
             is_review_mode: false,
             pending_about_save: false,
+            about_memorized_in_session: false,
+            background_memorize_active: false,
         }
     }
 
@@ -857,6 +918,8 @@ impl ChatWidget {
             pending_notification: None,
             is_review_mode: false,
             pending_about_save: false,
+            about_memorized_in_session: false,
+            background_memorize_active: false,
         }
     }
 
