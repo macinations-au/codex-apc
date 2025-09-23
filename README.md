@@ -208,12 +208,7 @@ Update & Version
 Notes
 - Custom prompts under your Codex prompts directory are auto‑discovered and appear as additional commands.
 
-Screenshots
------------
-- Put screenshots in `docs/images/` and reference them here. Suggested shots:
-  - CLI `/model` picker showing Ollama entries
-  - Collapsed “Thinking” chevron (▶) and expanded (▼)
-  - ACP in an IDE with `/reasoning summary`
+
 
 CI
 --
