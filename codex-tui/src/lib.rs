@@ -56,6 +56,7 @@ mod pager_overlay;
 mod rate_limits_view;
 mod render;
 mod resume_picker;
+mod review_codebase;
 mod session_log;
 mod shimmer;
 mod slash_command;

@@ -271,7 +271,7 @@ Notes for Agents
                     if let Some(state) = sessions.get_mut(&sid_str) {
                         state.current_model = model_name.clone();
                         if let Some(e) = effort {
-                            state.current_effort = e;
+                            state.current_effort = Some(e);
                         }
                     }
                 }
@@ -284,7 +284,7 @@ Notes for Agents
                     approval_policy: None,
                     sandbox_policy: None,
                     model: Some(model_name.clone()),
-                    effort,
+                    effort: effort.map(Some),
                     summary: None,
                 };
                 if let Some(conv) = session.conversation.as_ref() {
@@ -372,7 +372,7 @@ Notes for Agents
             "compact" => Some(Op::Compact),
             "list-tools" | "tools" => Some(Op::ListMcpTools),
             "list-custom-prompts" | "prompts" => Some(Op::ListCustomPrompts),
-            "history" => Some(Op::GetHistory),
+            "history" => Some(Op::GetPath),
             "shutdown" => Some(Op::Shutdown),
             _ => None,
         };

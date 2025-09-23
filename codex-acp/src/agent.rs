@@ -23,8 +23,9 @@ use codex_core::{
         AskForApproval, EventMsg, InputItem, Op, ReviewDecision, SandboxPolicy, Submission,
         TokenUsage,
     },
-    protocol_config_types::ReasoningEffort,
+    protocol_config_types::ReasoningEffort as ReasoningEffortConfig,
 };
+use codex_protocol::mcp_protocol::ConversationId;
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot, oneshot::Sender};
 use tokio::task;
@@ -45,7 +46,7 @@ struct SessionState {
     token_usage: Option<TokenUsage>,
     show_reasoning: bool,
     current_model: String,
-    current_effort: ReasoningEffort,
+    current_effort: Option<ReasoningEffortConfig>,
 }
 
 pub struct CodexAgent {
@@ -66,11 +67,7 @@ impl CodexAgent {
         client_tx: mpsc::UnboundedSender<ClientOp>,
         config: CodexConfig,
     ) -> Self {
-        let auth = AuthManager::shared(
-            config.codex_home.clone(),
-            config.preferred_auth_method,
-            config.responses_originator_header.clone(),
-        );
+        let auth = AuthManager::shared(config.codex_home.clone());
         let conversation_manager = ConversationManager::new(auth.clone());
 
         Self {
@@ -232,7 +229,7 @@ impl Agent for CodexAgent {
                     .unwrap_or(false);
                 if allow_mock {
                     warn!(error = %e, "Failed to create Codex conversation; starting mock session (slash-commands only)");
-                    (uuid::Uuid::new_v4(), None)
+                    (ConversationId::new(), None)
                 } else {
                     return Err(Error::into_internal_error(e));
                 }

@@ -11,6 +11,8 @@ export CARGO_NET_GIT_FETCH_WITH_CLI=${CARGO_NET_GIT_FETCH_WITH_CLI:-true}
 run_crate() {
   local dir=$1
   echo "[ci-local] >> $dir" >&2
+  # Ensure clippy and rustfmt are present (some images/toolchains lack them)
+  rustup component add clippy rustfmt >/dev/null 2>&1 || true
   (cd "$dir" && cargo fmt --all -- --check)
   (cd "$dir" && cargo clippy -- -D warnings)
   (cd "$dir" && cargo test)
@@ -22,4 +24,3 @@ run_crate codex-tui
 run_crate codex-agentic
 
 echo "[ci-local] OK" >&2
-

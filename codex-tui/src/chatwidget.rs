@@ -327,12 +327,10 @@ impl ChatWidget {
 
     fn on_rate_limit_snapshot(&mut self, snapshot: Option<RateLimitSnapshotEvent>) {
         if let Some(snapshot) = snapshot {
-            let warnings = self
-                .rate_limit_warnings
-                .take_warnings(
-                    snapshot.secondary_used_percent,
-                    snapshot.primary_used_percent,
-                );
+            let warnings = self.rate_limit_warnings.take_warnings(
+                snapshot.secondary_used_percent,
+                snapshot.primary_used_percent,
+            );
             self.rate_limit_snapshot = Some(snapshot);
             if !warnings.is_empty() {
                 for warning in warnings {
@@ -934,6 +932,17 @@ impl ChatWidget {
         match cmd {
             SlashCommand::New => {
                 self.app_event_tx.send(AppEvent::NewSession);
+            }
+            SlashCommand::ReviewCodebase => {
+                // Show immediate progress line and spawn async review task
+                self.add_to_history(history_cell::new_review_status_line(
+                    "Starting codebase review…".to_string(),
+                ));
+                let app_tx = self.app_event_tx.clone();
+                let config = self.config.clone();
+                tokio::spawn(async move {
+                    let _ = crate::review_codebase::run_review_codebase(app_tx, config, None).await;
+                });
             }
             SlashCommand::Init => {
                 const INIT_PROMPT: &str = include_str!("../prompt_for_init_command.md");
