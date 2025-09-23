@@ -1,6 +1,7 @@
 [package]
 name = "codex-acp"
-authors = ["<gawaine2111@gmail.com>"]
+# authors field is optional for Cargo projects and not required for builds.
+# It has been removed to avoid outdated personal emails in manifests.
 version = "0.39.0-apc.5"
 edition = "2024"
 description = "ACP-compatible agent that bridges the OpenAI Codex runtime with ACP clients over stdio."
