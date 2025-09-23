@@ -162,25 +162,22 @@ pub async fn run_main(
 
     // Do not rely on persisted provider; treat provider as session-only.
     // If user passed --oss, set provider to OSS in-memory now.
-    if cli.oss {
-        if let Some(p) = codex_core::built_in_model_providers()
+    if cli.oss
+        && let Some(p) = codex_core::built_in_model_providers()
             .get(BUILT_IN_OSS_MODEL_PROVIDER_ID)
             .cloned()
-        {
-            config.model_provider_id = BUILT_IN_OSS_MODEL_PROVIDER_ID.to_string();
-            config.model_provider = p;
-        }
+    {
+        config.model_provider_id = BUILT_IN_OSS_MODEL_PROVIDER_ID.to_string();
+        config.model_provider = p;
     }
     // If the config contains `model_provider = "oss"` but the user didn't
     // pass `--oss`, switch to OpenAI provider in-memory (no persistence).
-    if !cli.oss && config.model_provider_id == codex_core::BUILT_IN_OSS_MODEL_PROVIDER_ID {
-        if let Some(p) = codex_core::built_in_model_providers()
-            .get("openai")
-            .cloned()
-        {
-            config.model_provider_id = "openai".to_string();
-            config.model_provider = p;
-        }
+    if !cli.oss
+        && config.model_provider_id == codex_core::BUILT_IN_OSS_MODEL_PROVIDER_ID
+        && let Some(p) = codex_core::built_in_model_providers().get("openai").cloned()
+    {
+        config.model_provider_id = "openai".to_string();
+        config.model_provider = p;
     }
 
     // Apply reasoning view preferences directly to config for TUI rendering.

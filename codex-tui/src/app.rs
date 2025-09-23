@@ -489,17 +489,16 @@ impl App {
                 ..
             } => {
                 // Toggle the most recent reasoning cell when composer is empty
-                if key_event.code == KeyCode::Char('r') && self.chat_widget.composer_is_empty() {
-                    if let Some(cell) = self.transcript_cells.last() {
-                        if let Some(rs) = cell
-                            .as_any()
-                            .downcast_ref::<crate::history_cell::ReasoningSummaryCell>()
-                        {
-                            rs.toggle();
-                            tui.frame_requester().schedule_frame();
-                            return;
-                        }
-                    }
+                if key_event.code == KeyCode::Char('r')
+                    && self.chat_widget.composer_is_empty()
+                    && let Some(cell) = self.transcript_cells.last()
+                    && let Some(rs) = cell
+                        .as_any()
+                        .downcast_ref::<crate::history_cell::ReasoningSummaryCell>()
+                {
+                    rs.toggle();
+                    tui.frame_requester().schedule_frame();
+                    return;
                 }
                 // Any non-Esc key press should cancel a primed backtrack.
                 // This avoids stale "Esc-primed" state after the user starts typing

@@ -49,7 +49,7 @@ impl MarkdownStreamCollector {
     /// final rendered line is considered incomplete and is not emitted.
     pub fn commit_complete_lines(&mut self, config: &Config) -> Vec<Line<'static>> {
         let mut source = self.buffer.clone();
-        if should_collapse_think(&config) {
+        if should_collapse_think(config) {
             source = collapse_think_blocks(&source);
         }
         let last_newline_idx = source.rfind('\n');
@@ -87,7 +87,7 @@ impl MarkdownStreamCollector {
     pub fn finalize_and_drain(&mut self, config: &Config) -> Vec<Line<'static>> {
         let raw_buffer = self.buffer.clone();
         let mut source: String = raw_buffer.clone();
-        if should_collapse_think(&config) {
+        if should_collapse_think(config) {
             source = collapse_think_blocks(&source);
         }
         if !source.ends_with('\n') {
