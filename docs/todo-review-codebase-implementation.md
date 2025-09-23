@@ -1,7 +1,7 @@
-# Implementation Task: `/review-codebase` (TUI)
+# Implementation Task: `/about-codebase` (TUI)
 
 ## Overview
-Build a new TUI slash command, `/review-codebase`, that generates a structured, persistent “Codebase Review” for the current workspace. It scans the repo (git‑aware), reads and samples key files locally (no model‑side exec), prompts the model to produce a Markdown report, saves the result to `${cwd}/.codex/review-codebase.json`, and shows live progress while working. Subsequent runs perform a delta update using Git and per‑file SHA‑256.
+Build a new TUI slash command, `/about-codebase`, that generates a structured, persistent “Codebase Review” for the current workspace. It scans the repo (git‑aware), reads and samples key files locally (no model‑side exec), prompts the model to produce a Markdown report, saves the result to `${cwd}/.codex/review-codebase.json`, and shows live progress while working. Subsequent runs perform a delta update using Git and per‑file SHA‑256.
 
 Primary design reference: `docs/enh-review-codebase.md`.
 
@@ -15,7 +15,7 @@ Primary design reference: `docs/enh-review-codebase.md`.
 - ACP parity; deep multi‑pass crawling across very large monorepos (a future `--deep` mode can add this).
 
 ## Deliverables
-1) Slash command `/review-codebase` wired into the TUI.
+1) Slash command `/about-codebase [--refresh|-r]` wired into the TUI.
 2) New module `codex-tui/src/review_codebase.rs` with scan, hash, sample, prompt, and persist logic.
 3) JSON schema saved to `${cwd}/.codex/review-codebase.json`.
 4) Unit/integration tests and brief documentation updates.
@@ -37,16 +37,16 @@ Primary design reference: `docs/enh-review-codebase.md`.
 #[strum(serialize_all = "kebab-case")]
 pub enum SlashCommand {
     // …
-    ReviewCodebase,
+    AboutCodebase,
 }
 
 impl SlashCommand {
     pub fn description(self) -> &'static str { match self { /* … */
-        SlashCommand::ReviewCodebase => "generate or update a persistent codebase review",
+        SlashCommand::AboutCodebase => "Tell me about this codebase (usage: /about-codebase [--refresh|-r])",
         // …
     }}
     pub fn available_during_task(self) -> bool { match self { /* … */
-        SlashCommand::ReviewCodebase => false,
+        SlashCommand::AboutCodebase => false,
         // …
     }}
 }
@@ -78,6 +78,7 @@ pub async fn run_review_codebase(
     app_tx: crate::app_event_sender::AppEventSender,
     config: codex_core::config::Config,
     previous_report: Option<JsonReport>,
+    force: bool,
 ) -> anyhow::Result<()> {
     // 1) announce start (progress line)
     // 2) collect context (git snapshot, curated files, deltas)
@@ -101,7 +102,7 @@ Notes:
 - File: `codex-tui/src/chatwidget.rs`
 - In `dispatch_command`, add:
 ```rust
-SlashCommand::ReviewCodebase => {
+SlashCommand::AboutCodebase => {
     // Show immediate progress line
     self.add_to_history(history_cell::new_review_status_line(
         "Starting codebase review…".to_string(),
@@ -115,6 +116,10 @@ SlashCommand::ReviewCodebase => {
         let _ = crate::review_codebase::run_review_codebase(app_tx, config, prev).await;
     });
 }
+
+// Typed command support:
+// Users can enter `/about-codebase --refresh` directly. The chat widget intercepts
+// typed submissions starting with `/about-codebase` and parses flags (`--refresh`|`-r`).
 ```
 - Progress updates from `run_review_codebase` should use `app_tx.send(AppEvent::InsertHistoryCell(history_cell::new_review_status_line(...)))`.
 
@@ -143,10 +148,10 @@ SlashCommand::ReviewCodebase => {
 - Integration:
   - Initial flow generates JSON and shows progress lines.
   - Update flow with a changed file; JSON updates and includes prior Markdown.
-  - No‑op detection path prints “No changes since last review”.
+- Default: show previous saved report (if available). If stale (>24h) or changes detected, display the report first and then suggest updating. Force update via `/about-codebase --refresh`.
 
 ## Acceptance Criteria
-- `/review-codebase` appears in the TUI command list with the described help text.
+- `/about-codebase` appears in the TUI command list with the described help text.
 - Running it:
   - Shows progress while scanning (at least 2–3 status lines over time).
   - Produces a Markdown review rendered in the transcript.
@@ -167,7 +172,7 @@ SlashCommand::ReviewCodebase => {
 
 # Run the TUI and invoke the command
 codex-agentic
-# then type: /review-codebase
+# then type: /about-codebase
 ```
 
 ## Notes
@@ -176,4 +181,4 @@ codex-agentic
 - Use minimal new dependencies: `sha2` for hashing; a small binary‑detection crate if needed (or lightweight magic‑byte checks).
 
 ## Summary
-This task adds a secure, deterministic `/review-codebase` flow with live progress, Git‑aware deltas, robust hashing, and an auditable JSON artifact, per the design in `docs/enh-review-codebase.md`.
+This task adds a secure, deterministic `/about-codebase` flow with live progress, Git‑aware deltas, robust hashing, and an auditable JSON artifact, per the design in `docs/enh-review-codebase.md`.

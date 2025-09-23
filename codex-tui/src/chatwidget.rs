@@ -186,6 +186,8 @@ pub(crate) struct ChatWidget {
     pending_notification: Option<Notification>,
     // Simple review mode flag; used to adjust layout and banners.
     is_review_mode: bool,
+    // If true, save the final assistant message of this turn into the about-codebase JSON.
+    pending_about_save: bool,
 }
 
 struct UserMessage {
@@ -315,9 +317,27 @@ impl ChatWidget {
         // If there is a queued user message, send exactly one now to begin the next turn.
         self.maybe_send_next_queued_input();
         // Emit a notification when the turn completes (suppressed if focused).
+        let last_message_for_notify = last_agent_message.clone().unwrap_or_default();
         self.notify(Notification::AgentTurnComplete {
-            response: last_agent_message.unwrap_or_default(),
+            response: last_message_for_notify,
         });
+        // If we were asked to persist the last response as the about-codebase report, do so now.
+        if self.pending_about_save {
+            if let Some(markdown) = last_agent_message {
+                let cwd = self.config.cwd.clone();
+                let model = Some(self.config.model.clone());
+                let tx = self.app_event_tx.clone();
+                tokio::spawn(async move {
+                    let _ = crate::review_codebase::update_report_markdown(&cwd, &markdown, model, None).await;
+                    tx.send(AppEvent::InsertHistoryCell(Box::new(
+                        history_cell::new_review_status_line(
+                            "Saved updated codebase report to .codex/review-codebase.json".to_string(),
+                        ),
+                    )));
+                });
+            }
+            self.pending_about_save = false;
+        }
     }
 
     pub(crate) fn set_token_info(&mut self, info: Option<TokenUsageInfo>) {
@@ -352,6 +372,8 @@ impl ChatWidget {
 
     fn on_error(&mut self, message: String) {
         self.finalize_turn();
+        // Cancel any pending about-codebase save on error
+        self.pending_about_save = false;
         self.add_to_history(history_cell::new_error_event(message));
         self.request_redraw();
 
@@ -365,6 +387,8 @@ impl ChatWidget {
     fn on_interrupted_turn(&mut self, reason: TurnAbortReason) {
         // Finalize, log a gentle prompt, and clear running state.
         self.finalize_turn();
+        // Cancel any pending about-codebase save when turn is aborted.
+        self.pending_about_save = false;
 
         if reason != TurnAbortReason::ReviewEnded {
             self.add_to_history(history_cell::new_error_event(
@@ -768,6 +792,7 @@ impl ChatWidget {
             suppress_session_configured_redraw: false,
             pending_notification: None,
             is_review_mode: false,
+            pending_about_save: false,
         }
     }
 
@@ -827,6 +852,7 @@ impl ChatWidget {
             suppress_session_configured_redraw: true,
             pending_notification: None,
             is_review_mode: false,
+            pending_about_save: false,
         }
     }
 
@@ -883,6 +909,35 @@ impl ChatWidget {
             _ => {
                 match self.bottom_pane.handle_key_event(key_event) {
                     InputResult::Submitted(text) => {
+                        // Intercept typed '/about-codebase [--refresh|-r]' to support an argument.
+                        let trimmed = text.trim();
+                        if let Some(rest) = trimmed.strip_prefix("/about-codebase") {
+                            let mut force = false;
+                            // Parse simple flags from the remainder
+                            if let Some(tokens) = shlex::split(rest) {
+                                for t in tokens {
+                                    match t.as_str() {
+                                        "--refresh" | "-r" | "refresh" => force = true,
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            self.add_to_history(history_cell::new_review_status_line(
+                                if force {
+                                    "Rebuilding codebase review (refresh)…".to_string()
+                                } else {
+                                    "Showing codebase report…".to_string()
+                                },
+                            ));
+                            let app_tx = self.app_event_tx.clone();
+                            let config = self.config.clone();
+                            // When forcing a refresh, persist the final agent message to the report JSON.
+                            self.pending_about_save = force;
+                            tokio::spawn(async move {
+                                let _ = crate::review_codebase::run_review_codebase(app_tx, config, None, force).await;
+                            });
+                            return; // Do not submit as a normal user message
+                        }
                         // If a task is running, queue the user input to be sent after the turn completes.
                         let user_message = UserMessage {
                             text,
@@ -933,15 +988,15 @@ impl ChatWidget {
             SlashCommand::New => {
                 self.app_event_tx.send(AppEvent::NewSession);
             }
-            SlashCommand::ReviewCodebase => {
-                // Show immediate progress line and spawn async review task
+            SlashCommand::AboutCodebase => {
+                // Show immediate progress line and spawn async review task (default: quick view)
                 self.add_to_history(history_cell::new_review_status_line(
-                    "Starting codebase review…".to_string(),
+                    "Showing codebase report…".to_string(),
                 ));
                 let app_tx = self.app_event_tx.clone();
                 let config = self.config.clone();
                 tokio::spawn(async move {
-                    let _ = crate::review_codebase::run_review_codebase(app_tx, config, None).await;
+                    let _ = crate::review_codebase::run_review_codebase(app_tx, config, None, false).await;
                 });
             }
             SlashCommand::Init => {
