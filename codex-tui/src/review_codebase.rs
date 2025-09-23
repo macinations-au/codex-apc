@@ -16,6 +16,9 @@ use tokio::time::{Duration, interval};
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::history_cell;
+use crate::history_cell::AgentMessageCell;
+use crate::markdown::append_markdown;
+use ratatui::text::Line;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FileEntry {
@@ -72,27 +75,123 @@ pub struct ReportBody {
 
 const REPORT_SCHEMA: &str = "codex-agentic/review-codebase@v1";
 
-/// Top-level entry invoked by the TUI when `/review-codebase` is run.
+/// Top-level entry invoked by the TUI when `/about-codebase` is run.
 pub async fn run_review_codebase(
     app_tx: AppEventSender,
     config: Config,
     _previous_report: Option<JsonReport>,
+    force: bool,
     // NOTE: we intentionally load the previous report from disk to avoid
     // crossing more state through the widget.
 ) -> anyhow::Result<()> {
     let cwd = config.cwd.clone();
 
-    // Announce start
-    app_tx.send(AppEvent::InsertHistoryCell(Box::new(
-        history_cell::new_review_status_line("Scanning repository…".to_string()),
-    )));
+    // Defer scanning status until we actually need to scan.
 
     let (inside_git, git) = get_git_snapshot(&cwd)
         .await
         .unwrap_or((false, GitSnapshot::default()));
 
-    // Determine file set to include (curated + deltas)
+    // Load previous report
     let prev = load_previous_report(&cwd).ok();
+
+    if !force {
+        if let Some(prev) = &prev {
+            // Always show the previous report first for quick context.
+            let ts = prev.generated_at.to_rfc3339();
+            app_tx.send(AppEvent::InsertHistoryCell(Box::new(
+                history_cell::new_info_event(
+                    format!("Showing last codebase report ({ts})"),
+                    None,
+                ),
+            )));
+            if prev.report.markdown.trim().is_empty() {
+                app_tx.send(AppEvent::InsertHistoryCell(Box::new(
+                    history_cell::new_info_event(
+                        "No saved report content yet — run /about-codebase --refresh to generate one.".to_string(),
+                        None,
+                    ),
+                )));
+            } else {
+                let mut rendered: Vec<Line<'static>> = Vec::new();
+                append_markdown(&prev.report.markdown, &mut rendered, &config);
+                let cell = AgentMessageCell::new(rendered, true);
+                app_tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
+            }
+
+            // Decide whether to suggest an update (stale or changes found)
+            let age = Utc::now() - prev.generated_at;
+            let is_stale = age.num_hours() >= 24;
+            let changed = if inside_git {
+                prev.git.commit_hash.as_deref() != git.commit_hash.as_deref() || git.is_dirty
+            } else {
+                false
+            };
+            if is_stale || changed {
+                let mut hint = String::new();
+                if is_stale {
+                    hint.push_str(&format!("Report is {}h old. ", age.num_hours()));
+                }
+                if changed {
+                    hint.push_str("Changes detected since last review. ");
+                }
+                hint.push_str("Run /about-codebase --refresh to regenerate now.");
+                app_tx.send(AppEvent::InsertHistoryCell(Box::new(
+                    history_cell::new_info_event("Update available".to_string(), Some(hint)),
+                )));
+            }
+            return Ok(());
+        }
+        // No previous report; inform the user this initial run may take time (cyan status style).
+        app_tx.send(AppEvent::InsertHistoryCell(Box::new(
+            history_cell::new_review_status_line(
+                "First time running code check — generating the report…".to_string(),
+            ),
+        )));
+        app_tx.send(AppEvent::InsertHistoryCell(Box::new(
+            history_cell::new_review_status_line(
+                "Please wait, this may take some time :)".to_string(),
+            ),
+        )));
+    }
+
+    // Fast-path: if in Git with clean worktree and same HEAD as last run, just render previous report.
+    if inside_git
+        && !git.is_dirty
+        && prev
+            .as_ref()
+            .and_then(|p| p.git.commit_hash.clone())
+            .as_deref()
+            == git.commit_hash.as_deref()
+    {
+        if let Some(prev) = prev {
+            let ts = prev.generated_at.to_rfc3339();
+            app_tx.send(AppEvent::InsertHistoryCell(Box::new(
+                history_cell::new_info_event(
+                    format!(
+                        "No changes since last review — showing previous report ({ts})"
+                    ),
+                    None,
+                ),
+            )));
+            if prev.report.markdown.trim().is_empty() {
+                app_tx.send(AppEvent::InsertHistoryCell(Box::new(
+                    history_cell::new_info_event(
+                        "No saved report content yet — run /about-codebase --refresh to generate one.".to_string(),
+                        None,
+                    ),
+                )));
+            } else {
+                let mut rendered: Vec<Line<'static>> = Vec::new();
+                append_markdown(&prev.report.markdown, &mut rendered, &config);
+                let cell = AgentMessageCell::new(rendered, true);
+                app_tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
+            }
+            return Ok(());
+        }
+    }
+
+    // Determine file set to include (curated + deltas)
     let candidates = if inside_git {
         curate_initial_file_set(&cwd)
             .union(&git_delta_changed_paths(prev.as_ref(), &git).await)
@@ -118,18 +217,8 @@ pub async fn run_review_codebase(
         }
     }
 
-    // Compute inputs hash and detect no-op vs previous
-    let inputs_hash = compute_inputs_hash(git.commit_hash.as_deref(), &files);
-    let prev_inputs_hash = prev.as_ref().map(|p| p.inputs_hash.as_str());
-    if prev_inputs_hash == Some(inputs_hash.as_str()) {
-        app_tx.send(AppEvent::InsertHistoryCell(Box::new(
-            history_cell::new_info_event(
-                "No changes since last review".to_string(),
-                Some("Skipping model call.".to_string()),
-            ),
-        )));
-        return Ok(());
-    }
+    // Compute inputs hash for persistence; since this is force or no-previous, proceed to build prompt.
+    let _inputs_hash = compute_inputs_hash(git.commit_hash.as_deref(), &files);
 
     // Build prompt
     app_tx.send(AppEvent::InsertHistoryCell(Box::new(
@@ -144,27 +233,8 @@ pub async fn run_review_codebase(
         }],
     }));
 
-    // Persist JSON (preliminary; markdown will be available in the transcript)
-    let report = JsonReport {
-        schema: REPORT_SCHEMA.to_string(),
-        generated_at: Utc::now(),
-        workspace_root: cwd.clone(),
-        git: git.clone(),
-        context_source: if inside_git { "git" } else { "filesystem" }.to_string(),
-        model: Some(config.model.clone()),
-        token_usage: None,
-        inputs_hash: inputs_hash.clone(),
-        inputs: files.clone(),
-        references: files.iter().map(|f| f.path.clone()).collect(),
-        report: ReportBody {
-            markdown: String::new(),
-        },
-    };
-    save_report_atomic(&cwd, &report).await?;
-
-    app_tx.send(AppEvent::InsertHistoryCell(Box::new(
-        history_cell::new_review_status_line("Saved to .codex/review-codebase.json".to_string()),
-    )));
+    // Do not overwrite existing report until final markdown is available.
+    // The final save occurs after generation completes (see ChatWidget::on_task_complete).
 
     Ok(())
 }
@@ -401,7 +471,7 @@ fn assemble_prompt(
         *budget -= needed;
     }
 
-    push_line(&mut out, "# /review-codebase", &mut budget);
+    push_line(&mut out, "# /about-codebase", &mut budget);
     push_line(
         &mut out,
         "Please produce a concise, high-signal codebase review.",
@@ -486,6 +556,40 @@ pub async fn save_report_atomic(cwd: &Path, report: &JsonReport) -> anyhow::Resu
     tokio_fs::write(&tmp_path, &data).await?;
     tokio_fs::rename(&tmp_path, &final_path).await?;
     Ok(())
+}
+
+/// Update the saved report's markdown and basic metadata (time/model/token usage),
+/// preserving existing inputs metadata when present.
+pub async fn update_report_markdown(
+    cwd: &Path,
+    markdown: &str,
+    model: Option<String>,
+    _token_usage_total: Option<u32>,
+) -> anyhow::Result<()> {
+    let mut report = load_previous_report(cwd).unwrap_or_else(|_| JsonReport {
+        schema: REPORT_SCHEMA.to_string(),
+        generated_at: Utc::now(),
+        workspace_root: cwd.to_path_buf(),
+        git: GitSnapshot::default(),
+        context_source: "filesystem".to_string(),
+        model: None,
+        token_usage: None,
+        inputs_hash: String::new(),
+        inputs: Vec::new(),
+        references: Vec::new(),
+        report: ReportBody { markdown: String::new() },
+    });
+
+    // Refresh git snapshot opportunistically
+    if let Ok((inside_git, snap)) = get_git_snapshot(cwd).await {
+        report.git = snap;
+        report.context_source = if inside_git { "git" } else { "filesystem" }.to_string();
+    }
+
+    report.generated_at = Utc::now();
+    if let Some(m) = model { report.model = Some(m); }
+    report.report.markdown = markdown.to_string();
+    save_report_atomic(cwd, &report).await
 }
 
 // ------------------------
