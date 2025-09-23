@@ -125,3 +125,15 @@ Version comparison:
 which -a codex-agentic
 ls -lh ~/.cargo/bin/codex-agentic codex-agentic/target/release/codex-agentic
 ```
+
+## Codebase Review & Memorization
+
+- Review artifact: the latest codebase report is saved at `.codex/review-codebase.json` with the Markdown body in `report.markdown`.
+- TUI behavior:
+  - On session start, if a saved report exists, the TUI submits a background turn asking the model to memorize it and to reply exactly `Agent memorised.`
+  - This does not block input. The acknowledgement is shown as a small status line later. It runs once per session.
+- ACP behavior:
+  - The first `/about-codebase` quick view shows the saved report and then synchronously asks the model to memorize it (once per session). This avoids competing event readers.
+- Why: keeps the model aligned with the repo context without stalling the UI or starving other turns.
+- Markdown fixes: headings are sanitized to start on a new line; streaming also inserts a blank line before `#` if needed.
+- Avoid background readers in ACP: only one consumer should call `conversation.next_event()` at a time. Do not add background tasks that read conversation events.
