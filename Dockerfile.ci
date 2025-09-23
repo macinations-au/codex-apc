@@ -1,0 +1,20 @@
+FROM rust:1.89-bullseye
+
+# Minimal build tooling used by upstream crates (reqwest/openssl, etc.)
+RUN apt-get update -qq \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    ca-certificates \
+    git \
+    curl \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+# Keep cargo/git networking stable on CI-like networks
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true \
+    RUST_BACKTRACE=1
+
+# Workspace will be mounted at /w when running the container
+WORKDIR /w
+

@@ -439,15 +439,15 @@ fn styled_lines_to_string(lines: &[ratatui::text::Line<'static>]) -> String {
 
 fn sample_rate_limit_snapshot(
     primary_used_percent: f64,
-    weekly_used_percent: f64,
+    secondary_used_percent: f64,
     ratio_percent: f64,
 ) -> RateLimitSnapshotEvent {
     RateLimitSnapshotEvent {
         primary_used_percent,
-        weekly_used_percent,
-        primary_to_weekly_ratio_percent: ratio_percent,
+        secondary_used_percent,
+        primary_to_secondary_ratio_percent: ratio_percent,
         primary_window_minutes: 300,
-        weekly_window_minutes: 10_080,
+        secondary_window_minutes: 10_080,
     }
 }
 

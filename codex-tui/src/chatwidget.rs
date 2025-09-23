@@ -329,7 +329,10 @@ impl ChatWidget {
         if let Some(snapshot) = snapshot {
             let warnings = self
                 .rate_limit_warnings
-                .take_warnings(snapshot.weekly_used_percent, snapshot.primary_used_percent);
+                .take_warnings(
+                    snapshot.secondary_used_percent,
+                    snapshot.primary_used_percent,
+                );
             self.rate_limit_snapshot = Some(snapshot);
             if !warnings.is_empty() {
                 for warning in warnings {
