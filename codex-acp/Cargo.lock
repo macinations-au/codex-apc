@@ -515,7 +515,7 @@ dependencies = [
 [[package]]
 name = "codex-ansi-escape"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "ansi-to-tui",
  "ratatui",
@@ -525,7 +525,7 @@ dependencies = [
 [[package]]
 name = "codex-apply-patch"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "anyhow",
  "once_cell",
@@ -538,7 +538,7 @@ dependencies = [
 [[package]]
 name = "codex-arg0"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "anyhow",
  "codex-apply-patch",
@@ -552,7 +552,7 @@ dependencies = [
 [[package]]
 name = "codex-chatgpt"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "anyhow",
  "clap",
@@ -566,7 +566,7 @@ dependencies = [
 [[package]]
 name = "codex-cli"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "anyhow",
  "clap",
@@ -592,7 +592,7 @@ dependencies = [
 [[package]]
 name = "codex-common"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "clap",
  "codex-core",
@@ -604,7 +604,7 @@ dependencies = [
 [[package]]
 name = "codex-core"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "anyhow",
  "askama",
@@ -654,7 +654,7 @@ dependencies = [
 [[package]]
 name = "codex-exec"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -675,7 +675,7 @@ dependencies = [
 [[package]]
 name = "codex-file-search"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "anyhow",
  "clap",
@@ -689,7 +689,7 @@ dependencies = [
 [[package]]
 name = "codex-linux-sandbox"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "clap",
  "codex-core",
@@ -701,7 +701,7 @@ dependencies = [
 [[package]]
 name = "codex-login"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "base64",
  "chrono",
@@ -723,7 +723,7 @@ dependencies = [
 [[package]]
 name = "codex-mcp-client"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "anyhow",
  "mcp-types",
@@ -737,7 +737,7 @@ dependencies = [
 [[package]]
 name = "codex-mcp-server"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "anyhow",
  "codex-arg0",
@@ -760,7 +760,7 @@ dependencies = [
 [[package]]
 name = "codex-ollama"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "async-stream",
  "bytes",
@@ -776,7 +776,7 @@ dependencies = [
 [[package]]
 name = "codex-protocol"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "base64",
  "icu_decimal",
@@ -797,7 +797,7 @@ dependencies = [
 [[package]]
 name = "codex-protocol-ts"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "anyhow",
  "clap",
@@ -809,7 +809,7 @@ dependencies = [
 [[package]]
 name = "codex-tui"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2220,7 +2220,7 @@ dependencies = [
 [[package]]
 name = "mcp-types"
 version = "0.0.0"
-source = "git+https://github.com/openai/codex?rev=c415827a#c415827ac20b7af1155fa7aaabdd0da70d4779d7"
+source = "git+https://github.com/openai/codex?rev=c415827a#c93e77b68b49562a46e7dc47b3eb529942e078b0"
 dependencies = [
  "serde",
  "serde_json",
