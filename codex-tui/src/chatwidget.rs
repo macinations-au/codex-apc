@@ -1436,16 +1436,15 @@ impl ChatWidget {
                 tokio::runtime::Handle::current().block_on(async move {
                     if let Ok(client) =
                         codex_ollama::OllamaClient::try_from_oss_provider(&cfg).await
+                        && let Ok(list) = client.fetch_models().await
                     {
-                        if let Ok(list) = client.fetch_models().await {
-                            return list;
-                        }
+                        return list;
                     }
                     Vec::new()
                 })
             });
             for model_slug in extra_models.into_iter() {
-                let name = format!("{}", model_slug);
+                let name = model_slug.to_string();
                 let is_current = current_model.as_str() == model_slug.as_str();
                 let model_slug_cloned = model_slug.clone();
                 let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {

@@ -7,9 +7,17 @@ on:
     branches: [ main, master ]
 
 jobs:
+  # Cancel superseded CI runs on the same ref/branch
+  # Prevents wasting minutes when pushing multiple times quickly
+  # (GitHub renders it per-workflow run)
+  #
+  # Note: concurrency must be at the top level for each job in the matrix
   build:
     name: Build, Lint, Test
     runs-on: ${{ matrix.os }}
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}-${{ matrix.os }}
+      cancel-in-progress: true
     env:
       # Ensure embedded TUI upgrade banner points to this repo's README and
       # uses our install command when developers run locally under CI.
