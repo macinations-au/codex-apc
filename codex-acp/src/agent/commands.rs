@@ -686,6 +686,11 @@ Notes for Agents
             None => (0, 0, 0),
         };
 
+        // Compute YOLO indicator
+        let yolo = matches!(approval_mode, AskForApproval::Never)
+            && matches!(sandbox_mode, SandboxPolicy::DangerFullAccess);
+        let web_search = self.config.tools_web_search_request;
+
         // Markdown output with headings and lists
         format!(
             concat!(
@@ -693,6 +698,7 @@ Notes for Agents
                 "- Path: `{cwd}`\n",
                 "- Approval Mode: `{approval}`\n",
                 "- Sandbox: `{sandbox}`\n",
+                "- YOLO with search: `{yolo_with_search}`\n",
                 "- AGENTS files: {agents}\n\n",
                 "## Account\n",
                 "- Signed in with: `{auth_mode}`\n",
@@ -714,6 +720,7 @@ Notes for Agents
             approval = approval_mode,
             sandbox = sandbox_mode,
             agents = agents_line,
+            yolo_with_search = if yolo && web_search { "on" } else { "off" },
             auth_mode = auth_mode,
             email = email,
             plan = plan,

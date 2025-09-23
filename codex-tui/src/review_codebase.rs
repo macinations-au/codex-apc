@@ -160,8 +160,8 @@ pub async fn run_review_codebase(
             .and_then(|p| p.git.commit_hash.clone())
             .as_deref()
             == git.commit_hash.as_deref()
+        && let Some(prev) = prev
     {
-        if let Some(prev) = prev {
             let ts = prev.generated_at.to_rfc3339();
             app_tx.send(AppEvent::InsertHistoryCell(Box::new(
                 history_cell::new_info_event(
@@ -183,7 +183,6 @@ pub async fn run_review_codebase(
                 app_tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
             }
             return Ok(());
-        }
     }
 
     // Determine file set to include (curated + deltas)
