@@ -98,25 +98,25 @@ fn sanitize_markdown_headings(input: &str) -> String {
             continue;
         }
         if !in_fence && !at_line_start && bytes[i] == b'#' {
-                let mut j = i;
-                let mut hashes = 0;
-                while j < bytes.len() && bytes[j] == b'#' && hashes < 6 {
-                    hashes += 1;
-                    j += 1;
-                }
-                if hashes > 0 && j < bytes.len() && bytes[j] == b' ' {
-                    if !out.ends_with('\n') {
-                        out.push('\n');
-                    }
+            let mut j = i;
+            let mut hashes = 0;
+            while j < bytes.len() && bytes[j] == b'#' && hashes < 6 {
+                hashes += 1;
+                j += 1;
+            }
+            if hashes > 0 && j < bytes.len() && bytes[j] == b' ' {
+                if !out.ends_with('\n') {
                     out.push('\n');
-                    for _ in 0..hashes {
-                        out.push('#');
-                    }
-                    out.push(' ');
-                    i = j + 1;
-                    at_line_start = false;
-                    continue;
                 }
+                out.push('\n');
+                for _ in 0..hashes {
+                    out.push('#');
+                }
+                out.push(' ');
+                i = j + 1;
+                at_line_start = false;
+                continue;
+            }
         }
         let ch = input[i..].chars().next().unwrap();
         out.push(ch);
