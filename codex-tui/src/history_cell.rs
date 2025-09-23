@@ -1194,6 +1194,18 @@ pub(crate) fn new_status_output(
         SandboxPolicy::WorkspaceWrite { .. } => "workspace-write",
     };
     lines.push(vec!["  • Sandbox: ".into(), sandbox_name.into()].into());
+    // YOLO with search indicator when the dangerous combo is active
+    let yolo = matches!(config.sandbox_policy, SandboxPolicy::DangerFullAccess)
+        && matches!(config.approval_policy, codex_core::protocol::AskForApproval::Never);
+    let web_search_enabled = config.tools_web_search_request;
+    let yolo_label = if yolo && web_search_enabled {
+        "YOLO with search: on"
+    } else if yolo {
+        "YOLO mode: on"
+    } else {
+        "YOLO mode: off"
+    };
+    lines.push(vec!["  • ".into(), yolo_label.into()].into());
 
     // AGENTS.md files discovered via core's project_doc logic
     let agents_list = {

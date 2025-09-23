@@ -492,11 +492,12 @@ dependencies = [
 
 [[package]]
 name = "codex-acp"
-version = "0.39.0-apc.1"
+version = "0.39.0-apc.4"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
  "async-trait",
+ "chrono",
  "codex-cli",
  "codex-core",
  "codex-ollama",
