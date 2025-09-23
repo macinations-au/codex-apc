@@ -46,6 +46,15 @@ git tag -a v0.1.4 -m "v0.1.4"
 git push origin v0.1.4
 ```
 
+## CI Preflight (Local Checks)
+
+- Always mirror CI locally before pushing or tagging. See docs/CI-PREFLIGHT.md for step‑by‑step commands to:
+  - Run the Dockerized CI mirror (fmt, clippy, tests, release builds) across all crates.
+  - Iterate quickly with local cargo commands per crate.
+  - Optionally sanity‑check Windows builds.
+  - Validate ACP `/status` for `--yolo-with-search`.
+
+
 ## Known Release/CI Failures (and Fixes)
 During Sept 2025 we saw “Build (release)” failures on the Release workflow and “Build (debug)” failures on CI for tags `v0.1.1`–`v0.1.3`. Root causes and permanent fixes applied:
 
