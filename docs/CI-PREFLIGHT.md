@@ -61,21 +61,6 @@ git tag -a v0.39.0-apc.X -m "v0.39.0-apc.X"
 git push origin v0.39.0-apc.X
 ```
 
-### 5) ACP `/status` gotcha (YOLO with search)
-
-- The `acp --yolo-with-search` flag sets: `approval=never`, `sandbox=danger-full-access`, and enables `tools.web_search_request`.
-- TUI and ACP `/status` show “YOLO with search: on” only when all three are active. After changes to config loading or overrides, validate via stdio:
-
-```bash
-printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"v1","clientName":"cli","capabilities":{}}}' \
-  '{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"'"$PWD"'","mcpServers":[]}}' \
-  '{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"1","prompt":[{"type":"text","text":"/status"}]}}' \
-| RUST_LOG=warn codex-agentic acp --yolo-with-search
-```
-
 ### Summary
 - Always run `scripts/ci-docker.sh` before pushing to main or tagging.
 - Keep fmt/clippy/test green; update tests with new fields.
-- Use typed + KV overrides consistently for flags that affect runtime status (e.g., YOLO with search).
-
