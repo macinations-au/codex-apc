@@ -196,7 +196,7 @@ Slash commands (high‑use)
 - `/approvals <policy>` — `untrusted | on-request | on-failure | never`
 - `/reasoning <hidden|summary|raw>` — collapse or show “thinking”
 - `/init` — scaffold an AGENTS.md in the workspace
-- `/review-codebase` — generate or update a persistent codebase review (`.codex/review-codebase.json`) with live progress
+- `/about-codebase [--refresh|-r]` — show the latest codebase report; if stale (>24h) or changes are detected, it asks you to refresh. Pass `--refresh` to rebuild immediately.
 
 Update & Version
 ----------------

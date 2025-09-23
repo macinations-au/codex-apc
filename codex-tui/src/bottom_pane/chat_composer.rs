@@ -416,6 +416,8 @@ impl ChatComposer {
                 ..
             } => {
                 if let Some(sel) = popup.selected_item() {
+                    // Capture the current line before clearing it so we can preserve args.
+                    let line_before = self.textarea.text().to_string();
                     // Clear textarea so no residual text remains.
                     self.textarea.set_text("");
                     // Capture any needed data from popup before clearing it.
@@ -430,7 +432,18 @@ impl ChatComposer {
 
                     match sel {
                         CommandItem::Builtin(cmd) => {
-                            return (InputResult::Command(cmd), true);
+                            // If the user typed arguments after the command, submit the raw line
+                            // so the ChatWidget can parse flags (e.g., `/about-codebase --refresh`).
+                            let trimmed = line_before.trim_start();
+                            let prefix = format!("/{}", cmd.command());
+                            let has_args = trimmed.starts_with(&prefix)
+                                && trimmed.len() > prefix.len()
+                                && trimmed.as_bytes()[prefix.len()] == b' ';
+                            if has_args {
+                                return (InputResult::Submitted(line_before), true);
+                            } else {
+                                return (InputResult::Command(cmd), true);
+                            }
                         }
                         CommandItem::UserPrompt(_) => {
                             if let Some(contents) = prompt_content {
