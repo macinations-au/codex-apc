@@ -12,6 +12,7 @@ rust-version = "1.89"
 agent-client-protocol = { version = "0.4.0" }
 anyhow = { version = "1" }
 async-trait = { version = "0.1" }
+chrono = { version = "0.4", features = ["serde"] }
 codex-cli = { git = "https://github.com/openai/codex", rev = "c415827a" }
 codex-core = { git = "https://github.com/openai/codex", rev = "c415827a" }
 codex-ollama = { git = "https://github.com/openai/codex", package = "codex-ollama", rev = "c415827a" }
