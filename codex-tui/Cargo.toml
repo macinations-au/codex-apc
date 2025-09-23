@@ -25,18 +25,18 @@ async-stream = "0.3.6"
 base64 = "0.22.1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-codex-ansi-escape = { git = "https://github.com/openai/codex" }
-codex-arg0 = { git = "https://github.com/openai/codex" }
-codex-common = { git = "https://github.com/openai/codex", features = [
+codex-ansi-escape = { git = "https://github.com/openai/codex", rev = "c415827a" }
+codex-arg0 = { git = "https://github.com/openai/codex", rev = "c415827a" }
+codex-common = { git = "https://github.com/openai/codex", rev = "c415827a", features = [
     "cli",
     "elapsed",
     "sandbox_summary",
 ] }
-codex-core = { git = "https://github.com/openai/codex" }
-codex-file-search = { git = "https://github.com/openai/codex" }
-codex-login = { git = "https://github.com/openai/codex" }
-codex-ollama = { git = "https://github.com/openai/codex" }
-codex-protocol = { git = "https://github.com/openai/codex" }
+codex-core = { git = "https://github.com/openai/codex", rev = "c415827a" }
+codex-file-search = { git = "https://github.com/openai/codex", rev = "c415827a" }
+codex-login = { git = "https://github.com/openai/codex", rev = "c415827a" }
+codex-ollama = { git = "https://github.com/openai/codex", rev = "c415827a" }
+codex-protocol = { git = "https://github.com/openai/codex", rev = "c415827a" }
 color-eyre = "0.6.3"
 crossterm = { version = "0.28.1", features = [
     "bracketed-paste",
@@ -50,7 +50,7 @@ image = { version = "^0.25.8", default-features = false, features = [
 ] }
 itertools = "0.14.0"
 lazy_static = "1"
-mcp-types = { git = "https://github.com/openai/codex" }
+mcp-types = { git = "https://github.com/openai/codex", rev = "c415827a" }
 once_cell = "1"
 path-clean = "1.0.1"
 rand = "0.9"
