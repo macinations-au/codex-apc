@@ -328,10 +328,14 @@ impl ChatWidget {
                 let model = Some(self.config.model.clone());
                 let tx = self.app_event_tx.clone();
                 tokio::spawn(async move {
-                    let _ = crate::review_codebase::update_report_markdown(&cwd, &markdown, model, None).await;
+                    let _ = crate::review_codebase::update_report_markdown(
+                        &cwd, &markdown, model, None,
+                    )
+                    .await;
                     tx.send(AppEvent::InsertHistoryCell(Box::new(
                         history_cell::new_review_status_line(
-                            "Saved updated codebase report to .codex/review-codebase.json".to_string(),
+                            "Saved updated codebase report to .codex/review-codebase.json"
+                                .to_string(),
                         ),
                     )));
                 });
@@ -922,19 +926,20 @@ impl ChatWidget {
                                     }
                                 }
                             }
-                            self.add_to_history(history_cell::new_review_status_line(
-                                if force {
-                                    "Rebuilding codebase review (refresh)…".to_string()
-                                } else {
-                                    "Showing codebase report…".to_string()
-                                },
-                            ));
+                            self.add_to_history(history_cell::new_review_status_line(if force {
+                                "Rebuilding codebase review (refresh)…".to_string()
+                            } else {
+                                "Showing codebase report…".to_string()
+                            }));
                             let app_tx = self.app_event_tx.clone();
                             let config = self.config.clone();
                             // When forcing a refresh, persist the final agent message to the report JSON.
                             self.pending_about_save = force;
                             tokio::spawn(async move {
-                                let _ = crate::review_codebase::run_review_codebase(app_tx, config, None, force).await;
+                                let _ = crate::review_codebase::run_review_codebase(
+                                    app_tx, config, None, force,
+                                )
+                                .await;
                             });
                             return; // Do not submit as a normal user message
                         }
@@ -996,7 +1001,9 @@ impl ChatWidget {
                 let app_tx = self.app_event_tx.clone();
                 let config = self.config.clone();
                 tokio::spawn(async move {
-                    let _ = crate::review_codebase::run_review_codebase(app_tx, config, None, false).await;
+                    let _ =
+                        crate::review_codebase::run_review_codebase(app_tx, config, None, false)
+                            .await;
                 });
             }
             SlashCommand::Init => {

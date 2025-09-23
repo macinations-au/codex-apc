@@ -100,10 +100,7 @@ pub async fn run_review_codebase(
             // Always show the previous report first for quick context.
             let ts = prev.generated_at.to_rfc3339();
             app_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                history_cell::new_info_event(
-                    format!("Showing last codebase report ({ts})"),
-                    None,
-                ),
+                history_cell::new_info_event(format!("Showing last codebase report ({ts})"), None),
             )));
             if prev.report.markdown.trim().is_empty() {
                 app_tx.send(AppEvent::InsertHistoryCell(Box::new(
@@ -168,9 +165,7 @@ pub async fn run_review_codebase(
             let ts = prev.generated_at.to_rfc3339();
             app_tx.send(AppEvent::InsertHistoryCell(Box::new(
                 history_cell::new_info_event(
-                    format!(
-                        "No changes since last review — showing previous report ({ts})"
-                    ),
+                    format!("No changes since last review — showing previous report ({ts})"),
                     None,
                 ),
             )));
@@ -577,7 +572,9 @@ pub async fn update_report_markdown(
         inputs_hash: String::new(),
         inputs: Vec::new(),
         references: Vec::new(),
-        report: ReportBody { markdown: String::new() },
+        report: ReportBody {
+            markdown: String::new(),
+        },
     });
 
     // Refresh git snapshot opportunistically
@@ -587,7 +584,9 @@ pub async fn update_report_markdown(
     }
 
     report.generated_at = Utc::now();
-    if let Some(m) = model { report.model = Some(m); }
+    if let Some(m) = model {
+        report.model = Some(m);
+    }
     report.report.markdown = markdown.to_string();
     save_report_atomic(cwd, &report).await
 }
