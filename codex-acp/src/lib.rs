@@ -5,6 +5,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt 
 use agent_client_protocol::{AgentSideConnection, Client};
 
 mod agent;
+pub mod review_persist;
 pub use crate::agent::CodexAgent;
 
 use codex_core::config::{Config, ConfigOverrides};
