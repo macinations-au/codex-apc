@@ -1196,7 +1196,10 @@ pub(crate) fn new_status_output(
     lines.push(vec!["  • Sandbox: ".into(), sandbox_name.into()].into());
     // YOLO with search indicator when the dangerous combo is active
     let yolo = matches!(config.sandbox_policy, SandboxPolicy::DangerFullAccess)
-        && matches!(config.approval_policy, codex_core::protocol::AskForApproval::Never);
+        && matches!(
+            config.approval_policy,
+            codex_core::protocol::AskForApproval::Never
+        );
     let web_search_enabled = config.tools_web_search_request;
     let yolo_label = if yolo && web_search_enabled {
         "YOLO with search: on"

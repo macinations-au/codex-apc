@@ -11,6 +11,7 @@ codex-acp = { path = "../codex-acp" }
 toml = "0.9"
 codex-core = { git = "https://github.com/openai/codex", rev = "c415827a" }
 codex-ollama = { git = "https://github.com/openai/codex", package = "codex-ollama", rev = "c415827a" }
+codex-protocol = { git = "https://github.com/openai/codex", rev = "c415827a" }
 tokio = { version = "1.47.1", features = ["rt","time","io-std","io-util"] }
 codex-tui = { path = "../codex-tui" }
 clap = { version = "4", features = ["derive"] }
