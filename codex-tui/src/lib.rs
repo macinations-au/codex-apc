@@ -174,7 +174,9 @@ pub async fn run_main(
     // pass `--oss`, switch to OpenAI provider in-memory (no persistence).
     if !cli.oss
         && config.model_provider_id == codex_core::BUILT_IN_OSS_MODEL_PROVIDER_ID
-        && let Some(p) = codex_core::built_in_model_providers().get("openai").cloned()
+        && let Some(p) = codex_core::built_in_model_providers()
+            .get("openai")
+            .cloned()
     {
         config.model_provider_id = "openai".to_string();
         config.model_provider = p;

@@ -289,7 +289,9 @@ fn run_embedded_cli(args: &[OsString]) -> Result<()> {
             }
         }
     }
-    if std::env::var("CODEX_UPGRADE_URL").is_err() && let Some(r) = &repo {
+    if std::env::var("CODEX_UPGRADE_URL").is_err()
+        && let Some(r) = &repo
+    {
         unsafe {
             std::env::set_var("CODEX_UPGRADE_URL", format!("https://github.com/{r}"));
         }
@@ -323,9 +325,9 @@ fn run_embedded_cli(args: &[OsString]) -> Result<()> {
         }
         cli
     } else {
-        codex_tui::Cli::parse_from(std::iter::once(OsString::from("codex-agentic")).chain(
-            args.iter().cloned(),
-        ))
+        codex_tui::Cli::parse_from(
+            std::iter::once(OsString::from("codex-agentic")).chain(args.iter().cloned()),
+        )
     };
 
     let rt = tokio::runtime::Builder::new_multi_thread()
