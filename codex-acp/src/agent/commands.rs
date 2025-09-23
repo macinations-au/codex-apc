@@ -121,68 +121,69 @@ impl CodexAgent {
                                 state.about_memorized = true;
                                 should_memorize = true;
                             }
-                            if let Some(conv) = session.conversation.as_ref() && should_memorize {
+                            if let Some(conv) = session.conversation.as_ref()
+                                && should_memorize
+                            {
                                 // Submit and synchronously stream the acknowledgement here to avoid
                                 // competing event readers.
-                                    let sid_str = session_id.0.to_string();
-                                    let submit_id =
-                                        format!("s{}-{}", sid_str, self.next_submit_seq.get());
-                                    self.next_submit_seq.set(self.next_submit_seq.get() + 1);
-                                    let mem_prompt = format!(
-                                        "Please memorize the following codebase report for this session. Do not analyze or restate it. When you are done, reply exactly with: Agent memorised.\n\n--- BEGIN CODEBASE REPORT ---\n{}\n--- END CODEBASE REPORT ---\n",
-                                        sanitized
-                                    );
-                                    // Ensure the acknowledgement starts on a new line in the client.
-                                    let (tx, rx) = oneshot::channel();
-                                    self.send_message_chunk(session_id, "\n\n".into(), tx)?;
-                                    let _ = rx.await;
-                                    conv.submit_with_id(Submission {
-                                        id: submit_id.clone(),
-                                        op: Op::UserInput {
-                                            items: vec![InputItem::Text { text: mem_prompt }],
-                                        },
-                                    })
-                                    .await
-                                    .map_err(Error::into_internal_error)?;
+                                let sid_str = session_id.0.to_string();
+                                let submit_id =
+                                    format!("s{}-{}", sid_str, self.next_submit_seq.get());
+                                self.next_submit_seq.set(self.next_submit_seq.get() + 1);
+                                let mem_prompt = format!(
+                                    "Please memorize the following codebase report for this session. Do not analyze or restate it. When you are done, reply exactly with: Agent memorised.\n\n--- BEGIN CODEBASE REPORT ---\n{}\n--- END CODEBASE REPORT ---\n",
+                                    sanitized
+                                );
+                                // Ensure the acknowledgement starts on a new line in the client.
+                                let (tx, rx) = oneshot::channel();
+                                self.send_message_chunk(session_id, "\n\n".into(), tx)?;
+                                let _ = rx.await;
+                                conv.submit_with_id(Submission {
+                                    id: submit_id.clone(),
+                                    op: Op::UserInput {
+                                        items: vec![InputItem::Text { text: mem_prompt }],
+                                    },
+                                })
+                                .await
+                                .map_err(Error::into_internal_error)?;
 
-                                    // Stream the acknowledgement back to the client synchronously
-                                    loop {
-                                        let event = conv
-                                            .next_event()
-                                            .await
-                                            .map_err(Error::into_internal_error)?;
-                                        if event.id != submit_id {
-                                            continue;
+                                // Stream the acknowledgement back to the client synchronously
+                                loop {
+                                    let event = conv
+                                        .next_event()
+                                        .await
+                                        .map_err(Error::into_internal_error)?;
+                                    if event.id != submit_id {
+                                        continue;
+                                    }
+                                    match event.msg {
+                                        EventMsg::AgentMessageDelta(delta) => {
+                                            let (tx, rx) = oneshot::channel();
+                                            self.send_message_chunk(
+                                                session_id,
+                                                delta.delta.into(),
+                                                tx,
+                                            )?;
+                                            let _ = rx.await;
                                         }
-                                        match event.msg {
-                                            EventMsg::AgentMessageDelta(delta) => {
-                                                let (tx, rx) = oneshot::channel();
-                                                self.send_message_chunk(
-                                                    session_id,
-                                                    delta.delta.into(),
-                                                    tx,
-                                                )?;
-                                                let _ = rx.await;
-                                            }
-                                            EventMsg::AgentMessage(_) => {}
-                                            EventMsg::TaskComplete(_)
-                                            | EventMsg::ShutdownComplete => {
-                                                break;
-                                            }
-                                            EventMsg::Error(err) => {
-                                                let (tx, rx) = oneshot::channel();
-                                                self.send_message_chunk(
-                                                    session_id,
-                                                    err.message.into(),
-                                                    tx,
-                                                )?;
-                                                let _ = rx.await;
-                                                break;
-                                            }
-                                            _ => {}
+                                        EventMsg::AgentMessage(_) => {}
+                                        EventMsg::TaskComplete(_) | EventMsg::ShutdownComplete => {
+                                            break;
                                         }
+                                        EventMsg::Error(err) => {
+                                            let (tx, rx) = oneshot::channel();
+                                            self.send_message_chunk(
+                                                session_id,
+                                                err.message.into(),
+                                                tx,
+                                            )?;
+                                            let _ = rx.await;
+                                            break;
+                                        }
+                                        _ => {}
                                     }
                                 }
+                            }
                             return Ok(true);
                         }
                     } else {
