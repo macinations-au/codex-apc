@@ -16,7 +16,7 @@ pub enum SlashCommand {
     Approvals,
     Reasoning,
     Review,
-    ReviewCodebase,
+    AboutCodebase,
     New,
     Init,
     Compact,
@@ -39,7 +39,7 @@ impl SlashCommand {
             SlashCommand::Init => "create an AGENTS.md file with instructions for Codex",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
             SlashCommand::Review => "review my current changes and find issues",
-            SlashCommand::ReviewCodebase => "generate or update a persistent codebase review",
+            SlashCommand::AboutCodebase => "Tell me about this codebase (usage: /about-codebase [--refresh|-r])",
             SlashCommand::Quit => "exit Codex",
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Mention => "mention a file",
@@ -71,7 +71,7 @@ impl SlashCommand {
             | SlashCommand::Approvals
             | SlashCommand::Reasoning
             | SlashCommand::Review
-            | SlashCommand::ReviewCodebase
+            | SlashCommand::AboutCodebase
             | SlashCommand::Logout => false,
             SlashCommand::Diff
             | SlashCommand::Mention
