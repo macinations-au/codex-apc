@@ -162,27 +162,28 @@ pub async fn run_review_codebase(
             == git.commit_hash.as_deref()
         && let Some(prev) = prev
     {
-            let ts = prev.generated_at.to_rfc3339();
+        let ts = prev.generated_at.to_rfc3339();
+        app_tx.send(AppEvent::InsertHistoryCell(Box::new(
+            history_cell::new_info_event(
+                format!("No changes since last review — showing previous report ({ts})"),
+                None,
+            ),
+        )));
+        if prev.report.markdown.trim().is_empty() {
             app_tx.send(AppEvent::InsertHistoryCell(Box::new(
                 history_cell::new_info_event(
-                    format!("No changes since last review — showing previous report ({ts})"),
+                    "No saved report content yet — run /about-codebase --refresh to generate one."
+                        .to_string(),
                     None,
                 ),
             )));
-            if prev.report.markdown.trim().is_empty() {
-                app_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                    history_cell::new_info_event(
-                        "No saved report content yet — run /about-codebase --refresh to generate one.".to_string(),
-                        None,
-                    ),
-                )));
-            } else {
-                let mut rendered: Vec<Line<'static>> = Vec::new();
-                append_markdown(&prev.report.markdown, &mut rendered, &config);
-                let cell = AgentMessageCell::new(rendered, true);
-                app_tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
-            }
-            return Ok(());
+        } else {
+            let mut rendered: Vec<Line<'static>> = Vec::new();
+            append_markdown(&prev.report.markdown, &mut rendered, &config);
+            let cell = AgentMessageCell::new(rendered, true);
+            app_tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
+        }
+        return Ok(());
     }
 
     // Determine file set to include (curated + deltas)

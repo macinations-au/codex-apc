@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use codex_core::config::ConfigOverrides as CoreConfigOverrides;
+use codex_core::protocol::AskForApproval;
+use codex_protocol::config_types::SandboxMode as SandboxModeCfg;
 use std::env;
 use std::ffi::OsString;
 use toml::Value as TomlValue;
@@ -123,6 +125,11 @@ fn main() -> Result<()> {
                         TomlValue::String("danger-full-access".into()),
                     ));
                     overrides.push(("tools.web_search_request".into(), TomlValue::Boolean(true)));
+
+                    // Also set typed overrides for reliability across loaders.
+                    typed_overrides.approval_policy = Some(AskForApproval::Never);
+                    typed_overrides.sandbox_mode = Some(SandboxModeCfg::DangerFullAccess);
+                    typed_overrides.tools_web_search_request = Some(true);
                 }
                 if let Some(v) = model {
                     overrides.push(("model".into(), TomlValue::String(v.clone())));
