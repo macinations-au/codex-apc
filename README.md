@@ -205,8 +205,16 @@ Update & Version
 - It links to this repo’s README (you’re here) and can show a one‑liner installer.
 - Versioning: we follow `0.39.0-apc.y` (our patch number is `y`).
 
+Functional Changes (Sept 2025)
+------------------------------
+- /about-codebase formatting: fixed run‑on Markdown (headings now start on a new line) in both TUI and ACP.
+- Memorize the saved report once per session:
+  - TUI: done in the background at startup (non‑blocking); a short “Agent memorised.” status appears later.
+  - ACP: done on the first quick view of the report; synchronous so the acknowledgement arrives promptly.
+- ACP stability: background readers that competed for conversation events were removed; custom prompt auto‑discovery is disabled in ACP.
+
 Notes
-- Custom prompts under your Codex prompts directory are auto‑discovered and appear as additional commands.
+- Custom prompt auto‑discovery remains in TUI. It is disabled in ACP to avoid event contention.
 
 
 
