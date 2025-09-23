@@ -10,8 +10,11 @@ impl CodexAgent {
         vec![
             AvailableCommand {
                 name: "about-codebase".into(),
-                description: "Tell me about this codebase (usage: /about-codebase [--refresh|-r])".into(),
-                input: Some(AvailableCommandInput::Unstructured { hint: "[--refresh|-r]".into() }),
+                description: "Tell me about this codebase (usage: /about-codebase [--refresh|-r])"
+                    .into(),
+                input: Some(AvailableCommandInput::Unstructured {
+                    hint: "[--refresh|-r]".into(),
+                }),
                 meta: None,
             },
             AvailableCommand {
@@ -102,17 +105,29 @@ impl CodexAgent {
                                 let _ = rx.await;
                             } else {
                                 let (tx, rx) = oneshot::channel();
-                                self.send_message_chunk(session_id, rep.report.markdown.into(), tx)?;
+                                self.send_message_chunk(
+                                    session_id,
+                                    rep.report.markdown.into(),
+                                    tx,
+                                )?;
                                 let _ = rx.await;
                             }
                         }
                         Err(_) => {
                             // First run: inform and fall through to refresh behavior
                             let (tx, rx) = oneshot::channel();
-                            self.send_message_chunk(session_id, "First time running code check — generating the report…".into(), tx)?;
+                            self.send_message_chunk(
+                                session_id,
+                                "First time running code check — generating the report…".into(),
+                                tx,
+                            )?;
                             let _ = rx.await;
                             let (tx, rx) = oneshot::channel();
-                            self.send_message_chunk(session_id, "Please wait, this may take some time :)".into(), tx)?;
+                            self.send_message_chunk(
+                                session_id,
+                                "Please wait, this may take some time :)".into(),
+                                tx,
+                            )?;
                             let _ = rx.await;
                             // Treat as refresh
                         }
@@ -132,7 +147,11 @@ impl CodexAgent {
                     .ok_or_else(Error::invalid_params)?;
                 let Some(conv) = session.conversation.as_ref() else {
                     let (tx, rx) = oneshot::channel();
-                    self.send_message_chunk(session_id, "Dev mock mode: refresh requires Codex backend".into(), tx)?;
+                    self.send_message_chunk(
+                        session_id,
+                        "Dev mock mode: refresh requires Codex backend".into(),
+                        tx,
+                    )?;
                     let _ = rx.await;
                     return Ok(true);
                 };
@@ -143,7 +162,10 @@ impl CodexAgent {
                     use std::fmt::Write as _;
                     let _ = writeln!(p, "# /about-codebase");
                     let _ = writeln!(p, "Please produce a concise, high-signal codebase review.");
-                    let _ = writeln!(p, "Focus on: Architecture, Important Flows, CI/Release, Config & Env, Design Choices, Risks.");
+                    let _ = writeln!(
+                        p,
+                        "Focus on: Architecture, Important Flows, CI/Release, Config & Env, Design Choices, Risks."
+                    );
                     let _ = writeln!(p, "");
                     let _ = writeln!(p, "Workspace: {}", cwd.display());
                     let _ = writeln!(p, "");
@@ -153,15 +175,14 @@ impl CodexAgent {
 
                 let submit_id = format!("s{}-{}", sid_str, self.next_submit_seq.get());
                 self.next_submit_seq.set(self.next_submit_seq.get() + 1);
-                conv
-                    .submit_with_id(Submission {
-                        id: submit_id.clone(),
-                        op: Op::UserInput {
-                            items: vec![InputItem::Text { text: prompt }],
-                        },
-                    })
-                    .await
-                    .map_err(Error::into_internal_error)?;
+                conv.submit_with_id(Submission {
+                    id: submit_id.clone(),
+                    op: Op::UserInput {
+                        items: vec![InputItem::Text { text: prompt }],
+                    },
+                })
+                .await
+                .map_err(Error::into_internal_error)?;
 
                 let mut acc = String::new();
                 loop {
@@ -184,9 +205,17 @@ impl CodexAgent {
                             // Persist the final markdown
                             let model = session.current_model.clone();
                             if !acc.trim().is_empty() {
-                                if let Err(e) = crate::review_persist::update_report_markdown_sync(&cwd, &acc, Some(model)) {
+                                if let Err(e) = crate::review_persist::update_report_markdown_sync(
+                                    &cwd,
+                                    &acc,
+                                    Some(model),
+                                ) {
                                     let (tx, rx) = oneshot::channel();
-                                    self.send_message_chunk(session_id, format!("Failed to save report: {e}").into(), tx)?;
+                                    self.send_message_chunk(
+                                        session_id,
+                                        format!("Failed to save report: {e}").into(),
+                                        tx,
+                                    )?;
                                     let _ = rx.await;
                                 } else {
                                     let (tx, rx) = oneshot::channel();

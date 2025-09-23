@@ -65,7 +65,9 @@ pub fn update_report_markdown_sync(
         inputs_hash: String::new(),
         inputs: Vec::new(),
         references: Vec::new(),
-        report: ReportBody { markdown: String::new() },
+        report: ReportBody {
+            markdown: String::new(),
+        },
     });
     report.generated_at = Utc::now();
     report.model = model;
@@ -80,4 +82,3 @@ pub fn update_report_markdown_sync(
     fs::rename(&tmp_path, &final_path)?;
     Ok(())
 }
-
