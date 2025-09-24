@@ -37,6 +37,7 @@ use codex_core::protocol::TokenUsageInfo;
 use codex_core::protocol::TurnAbortReason;
 use codex_core::protocol::TurnDiffEvent;
 use codex_core::protocol::UserMessageEvent;
+use std::process::Command as StdCommand;
 use codex_core::protocol::WebSearchBeginEvent;
 use codex_core::protocol::WebSearchEndEvent;
 use codex_protocol::mcp_protocol::ConversationId;
@@ -1219,6 +1220,12 @@ impl ChatWidget {
         let UserMessage { text, image_paths } = user_message;
         let mut items: Vec<InputItem> = Vec::new();
 
+        // Retrieval injection (local index) unless disabled
+        if std::env::var("CODEX_INDEX_RETRIEVAL").map(|v| v=="0" || v.eq_ignore_ascii_case("off")).unwrap_or(false) == false {
+            if let Some(ctx) = fetch_retrieval_context(&text) {
+                items.push(InputItem::Text { text: ctx });
+            }
+        }
         if !text.is_empty() {
             items.push(InputItem::Text { text: text.clone() });
         }
@@ -1980,3 +1987,20 @@ fn extract_first_bold(s: &str) -> Option<String> {
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+fn fetch_retrieval_context(query: &str) -> Option<String> {
+    if query.trim().is_empty() { return None; }
+    // best-effort call to codex-agentic index query
+    let out = StdCommand::new("codex-agentic").arg("index").arg("query").arg(query).arg("-k").arg("8").arg("--show-snippets").output().ok()?;
+    if !out.status.success() { return None; }
+    let mut s = String::from_utf8_lossy(&out.stdout).to_string();
+    if s.trim().is_empty() { return None; }
+    if s.len() > 2000 { s.truncate(2000); }
+    Some(format!("Context (top matches from local code index):
+
+```text
+{}
+```
+
+Use the above only if relevant.", s))
+}
