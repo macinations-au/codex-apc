@@ -198,7 +198,7 @@ Phase 1 — Core + CLI
 Phase 2 — ACP/TUI
 - [x] Add `/index` and `/search` slash commands
 - [x] Add retrieval hook before model call with token budget guard (ACP)
-- [ ] Extend `/status` panel to show index + analytics
+- [x] Extend `/status` panel to show index + analytics
 
 Phase 3 — Background Refresh (timer-based MVP in place; git-delta full rebuild)
 - [ ] Implement post-turn check + git-delta scan
