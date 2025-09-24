@@ -28,7 +28,7 @@ use codex_core::{
 use codex_protocol::mcp_protocol::ConversationId;
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot, oneshot::Sender};
-use tokio::process::Command as TokioCommand;
+use std::sync::OnceLock;
 use tokio::task;
 use tracing::{info, warn};
 
@@ -1015,23 +1015,64 @@ impl Agent for CodexAgent {
     }
 }
 
+
+static EMBEDDER: OnceLock<std::sync::Mutex<fastembed::TextEmbedding>> = OnceLock::new();
 async fn fetch_retrieval_context(blocks: &Vec<ContentBlock>) -> Option<String> {
     let mut q = String::new();
-    for b in blocks {
-        if let ContentBlock::Text(t) = b {
-            if !q.is_empty() { q.push_str("\n"); }
-            q.push_str(&t.text);
-        }
-    }
+    for b in blocks { if let ContentBlock::Text(t) = b { if !q.is_empty() { q.push_str("
+"); } q.push_str(&t.text); } }
     if q.trim().is_empty() { return None; }
     let q: String = q.chars().take(500).collect();
-    let out = TokioCommand::new("codex-agentic")
-        .arg("index").arg("query").arg(&q).arg("-k").arg("8").arg("--show-snippets")
-        .output().await.ok()?;
-    if !out.status.success() { return None; }
-    let mut s = String::from_utf8_lossy(&out.stdout).to_string();
-    if s.trim().is_empty() { return None; }
-    if s.len() > 2000 { s.truncate(2000); }
-    let ctx = format!("Context (top matches from local code index):\n\n```text\n{}\n```\n\nUse the above only if relevant.", s);
-    Some(ctx)
+    // Read manifest
+    let mbytes = std::fs::read(".codex/index/manifest.json").ok()?;
+    #[derive(serde::Deserialize)] struct ManifestLite { model: String, dim: usize }
+    let m: ManifestLite = serde_json::from_slice(&mbytes).ok()?;
+    let model = match m.model.as_str() { "bge-large-en-v1.5" => fastembed::EmbeddingModel::BGELargeENV15, _ => fastembed::EmbeddingModel::BGESmallENV15 };
+    {{ let init = || std::sync::Mutex::new(fastembed::TextEmbedding::try_new(fastembed::InitOptions::new(model)).expect("fastembed init")); EMBEDDER.get_or_init(init); }}
+    let mut qv = { let mut guard = EMBEDDER.get().unwrap().lock().ok()?; guard.embed(vec![q.clone()], None).ok()?.into_iter().next()? };
+    if qv.len()!=m.dim { return None; }
+    // normalize
+    let mut n=0f32; for &v in &qv { n+=v*v; } n=n.sqrt().max(1e-12); for v in &mut qv { *v/=n; }
+    // Load vectors + meta
+    let (ids, data) = load_vectors_mmap(".codex/index/vectors.hnsw").ok()?;
+    let meta = load_meta_jsonl(".codex/index/meta.jsonl").ok()?;
+    let dim=m.dim; use rayon::prelude::*;
+    let mut scores: Vec<(usize,f32)> = (0..ids.len()).into_par_iter().map(|i|{
+        let base=i*dim; let mut dot=0f32; for j in 0..dim { dot+=qv[j]*data[base+j]; } (i,dot)
+    }).collect();
+    scores.par_sort_unstable_by(|a,b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    // Only inject when top score >= threshold (default 0.95)
+    let threshold: f32 = std::env::var("CODEX_INDEX_RETRIEVAL_THRESHOLD")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(0.95);
+    if scores.first().map(|(_,s)| *s).unwrap_or(0.0) < threshold { return None; }
+
+    let mut out=String::from("High-confidence matches (>=95%):
+");
+    let mut count=0usize;
+    for (rank,(i,score)) in scores.into_iter().take_while(|(_,s)| *s >= threshold).take(5).enumerate() {
+        let id=ids[i]; if let Some(r)=meta.get(&id) {
+            out.push_str(&format!("[{rank}] {score:.3} {}:{}-{} ({})
+", r.path, r.start, r.end, r.lang));
+            let mut prev=r.preview.clone(); if prev.len()>600 { prev.truncate(600); }
+            out.push_str(&prev); out.push_str("
+---
+");
+            count+=1;
+        }
+    }
+    if count==0 { return None; }
+    if out.len()>2000 { out.truncate(2000); }
+    Some(format!("Context (top matches from local code index):
+
+```text
+{}
+```
+
+Use the above only if relevant.", out))
 }
+fn load_vectors_mmap(p:&str)->Result<(Vec<u64>,Vec<f32>),()> { use std::fs::File; use std::io::Read; use memmap2::MmapOptions; let f=File::open(p).map_err(|_|())?; let mut r=std::io::BufReader::new(f); let mut b4=[0u8;4]; let mut b8=[0u8;8]; r.read_exact(&mut b4).map_err(|_|())?; r.read_exact(&mut b4).map_err(|_|())?; let dim=u32::from_le_bytes(b4) as usize; r.read_exact(&mut b8).map_err(|_|())?; let rows=u64::from_le_bytes(b8) as usize; let mut ids=Vec::with_capacity(rows); for _ in 0..rows { r.read_exact(&mut b8).map_err(|_|())?; ids.push(u64::from_le_bytes(b8)); } let f2=r.into_inner(); let mmap=unsafe{MmapOptions::new().map(&f2).map_err(|_|())?}; let start=4+4+8+rows*8; let bytes=&mmap[start..start+rows*dim*4]; let mut data=Vec::with_capacity(rows*dim); let mut i=0usize; while i<bytes.len(){ data.push(f32::from_le_bytes([bytes[i],bytes[i+1],bytes[i+2],bytes[i+3]])); i+=4;} Ok((ids,data)) }
+#[derive(serde::Deserialize)] struct MetaLite{ id:u64, path:String, start:usize, end:usize, lang:String, preview:String }
+fn load_meta_jsonl(p:&str)->Result<std::collections::HashMap<u64,MetaLite>,()>{ use std::io::BufRead; use std::fs::File; let f=std::io::BufReader::new(File::open(p).map_err(|_|())?); let mut map=std::collections::HashMap::new(); for line in f.lines(){ let l=line.map_err(|_|())?; if l.trim().is_empty(){continue;} let r:MetaLite=serde_json::from_str(&l).map_err(|_|())?; map.insert(r.id,r);} Ok(map)}
+
