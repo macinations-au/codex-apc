@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, Args};
 use codex_core::config::ConfigOverrides as CoreConfigOverrides;
 use codex_core::protocol::AskForApproval;
 use codex_protocol::config_types::SandboxMode as SandboxModeCfg;
@@ -83,6 +83,9 @@ enum Cmd {
     /// Print common examples and config recipes
     #[command(name = "help-recipes")]
     HelpRecipes,
+    /// Local codebase indexing (build/query/status/verify/clean)
+    #[command(subcommand)]
+    Index(IndexCmd),
 }
 
 #[derive(Subcommand, Debug)]
@@ -94,6 +97,51 @@ enum ModelsCmd {
         #[arg(short = 'c', long = "config")]
         config_overrides: Vec<String>,
     },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum IndexCmd {
+    /// Build or refresh the local index (default model: bge-small)
+    Build(IndexBuildArgs),
+    /// Query the local index for relevant code
+    Query(IndexQueryArgs),
+    /// Show index status
+    Status,
+    /// Verify index integrity
+    Verify,
+    /// Remove on-disk index
+    Clean,
+}
+
+#[derive(Args, Debug, Clone)]
+struct IndexBuildArgs {
+    /// Embedding model preset
+    #[arg(long, value_parser = ["bge-small","bge-large"], default_value = "bge-small")]
+    model: String,
+    /// Force full rebuild instead of incremental
+    #[arg(long)]
+    force: bool,
+    /// Chunking mode: auto (tree-sitter when available) | lines
+    #[arg(long, value_parser = ["auto","lines"], default_value = "auto")]
+    chunk: String,
+    /// Target lines per chunk (lines mode)
+    #[arg(long, default_value_t = 160)]
+    lines: usize,
+    /// Overlap lines between chunks (lines mode)
+    #[arg(long, default_value_t = 32)]
+    overlap: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+struct IndexQueryArgs {
+    /// Free-text query
+    query: String,
+    /// Top-K results
+    #[arg(short = 'k', long = "k", default_value_t = 8)]
+    k: usize,
+    /// Print snippet previews
+    #[arg(long = "show-snippets")]
+    show_snippets: bool,
 }
 
 fn main() -> Result<()> {
@@ -212,6 +260,9 @@ fn main() -> Result<()> {
             Cmd::HelpRecipes => {
                 print_recipes();
                 return Ok(());
+            }
+            Cmd::Index(index_cmd) => {
+                return indexing::dispatch(index_cmd.clone());
             }
         }
     }
@@ -396,3 +447,5 @@ Hint
 "#;
     println!("{}", RECIPES);
 }
+
+mod indexing;

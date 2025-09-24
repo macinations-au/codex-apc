@@ -181,18 +181,18 @@ Language Coverage (MVP)
 ## 14) Atomic Task Checklist
 
 Phase 1 — Core + CLI
-- [ ] Add `codex_index` module (library in `codex-agentic` for MVP)
-- [ ] Add dependencies: fastembed, hnsw_rs, tree-sitter, tree-sitter-rust, ignore, serde, sha2
-- [ ] Implement `BinaryGuard::is_binary(path)` (magic bytes + UTF‑8 probe)
-- [ ] Implement `Scanner` using `ignore` crate
-- [ ] Implement `Chunker` (tree-sitter Rust → blank-line → lines)
-- [ ] Implement `Embedder` wrapper (model download/cache, batch API)
+- [x] Add `codex_index` module (library in `codex-agentic` for MVP)
+- [x] Add dependencies: fastembed, hnsw_rs, tree-sitter, tree-sitter-rust, ignore, serde, sha2
+- [x] Implement `BinaryGuard::is_binary(path)` (magic bytes + UTF‑8 probe)
+- [x] Implement `Scanner` using `ignore` crate
+- [x] Implement `Chunker` (tree-sitter Rust → blank-line → lines)
+- [x] Implement `Embedder` wrapper (model download/cache, batch API)
 - [ ] Implement `IndexStore` (HNSW load/save, upsert, search)
-- [ ] Implement `MetaStore` (append + read by id)
-- [ ] Implement `Manifest` (load/save, checksums, compatibility)
-- [ ] Implement `Verifier` (checksums + structure)
-- [ ] Implement `AnalyticsStore` (atomic counters)
-- [ ] Implement CLI: `index build/query/status/verify/clean`
+- [x] Implement `MetaStore` (append + read by id)
+- [x] Implement `Manifest` (load/save, checksums, compatibility)
+- [x] Implement `Verifier` (checksums + structure)
+- [x] Implement `AnalyticsStore` (atomic counters)
+- [x] Implement CLI: `index build/query/status/verify/clean`
 - [ ] Wire default-on first run with opt-out env/flag
 
 Phase 2 — ACP/TUI
