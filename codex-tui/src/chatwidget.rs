@@ -37,7 +37,6 @@ use codex_core::protocol::TokenUsageInfo;
 use codex_core::protocol::TurnAbortReason;
 use codex_core::protocol::TurnDiffEvent;
 use codex_core::protocol::UserMessageEvent;
-use std::process::Command as StdCommand;
 use codex_core::protocol::WebSearchBeginEvent;
 use codex_core::protocol::WebSearchEndEvent;
 use codex_protocol::mcp_protocol::ConversationId;
@@ -53,6 +52,7 @@ use ratatui::layout::Layout;
 use ratatui::layout::Rect;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
+use std::process::Command as StdCommand;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::debug;
 
@@ -1221,8 +1221,23 @@ impl ChatWidget {
         let mut items: Vec<InputItem> = Vec::new();
 
         // Retrieval injection (local index) unless disabled
-        if std::env::var("CODEX_INDEX_RETRIEVAL").map(|v| v=="0" || v.eq_ignore_ascii_case("off")).unwrap_or(false) == false {
-            if let Some(ctx) = fetch_retrieval_context(&text) {
+        if std::env::var("CODEX_INDEX_RETRIEVAL")
+            .map(|v| v == "0" || v.eq_ignore_ascii_case("off"))
+            .unwrap_or(false)
+            == false
+        {
+            if let Some((ctx, refs_md)) = fetch_retrieval_context_plus(&text) {
+                // Show the references summary in the transcript before the model reply,
+                // then add a spacer line so the first assistant tokens begin on a new line.
+                let mut rendered: Vec<ratatui::text::Line<'static>> = Vec::new();
+                crate::markdown::append_markdown(&refs_md, &mut rendered, &self.config);
+                let body_cell = history_cell::AgentMessageCell::new(rendered, false);
+                self.add_to_history(body_cell);
+                // Explicit spacer line
+                let spacer = history_cell::AgentMessageCell::new(vec!["".into()], false);
+                self.add_to_history(spacer);
+
+                // Inject the detailed context into the model input.
                 items.push(InputItem::Text { text: ctx });
             }
         }
@@ -1989,18 +2004,97 @@ fn extract_first_bold(s: &str) -> Option<String> {
 pub(crate) mod tests;
 
 fn fetch_retrieval_context(query: &str) -> Option<String> {
-    if query.trim().is_empty() { return None; }
+    if query.trim().is_empty() {
+        return None;
+    }
     // best-effort call to codex-agentic index query
-    let out = StdCommand::new("codex-agentic").arg("index").arg("query").arg(query).arg("-k").arg("8").arg("--show-snippets").output().ok()?;
-    if !out.status.success() { return None; }
+    let out = StdCommand::new("codex-agentic")
+        .arg("index")
+        .arg("query")
+        .arg(query)
+        .arg("-k")
+        .arg("8")
+        .arg("--show-snippets")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
     let mut s = String::from_utf8_lossy(&out.stdout).to_string();
-    if s.trim().is_empty() { return None; }
-    if s.len() > 2000 { s.truncate(2000); }
-    Some(format!("Context (top matches from local code index):
+    if s.trim().is_empty() {
+        return None;
+    }
+    if s.len() > 2000 {
+        s.truncate(2000);
+    }
+    Some(format!(
+        "Context (top matches from local code index):
 
 ```text
 {}
 ```
 
-Use the above only if relevant.", s))
+Use the above only if relevant.",
+        s
+    ))
+}
+
+/// Fetch retrieval context plus a compact references list for UI display.
+/// Returns (context_block_for_llm, references_markdown_for_ui).
+fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
+    if query.trim().is_empty() {
+        return None;
+    }
+    // best-effort call to codex-agentic index query
+    let out = StdCommand::new("codex-agentic")
+        .arg("index")
+        .arg("query")
+        .arg(query)
+        .arg("-k")
+        .arg("8")
+        .arg("--show-snippets")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let mut s = String::from_utf8_lossy(&out.stdout).to_string();
+    if s.trim().is_empty() {
+        return None;
+    }
+    // Build the detailed context block (trim for safety)
+    if s.len() > 2000 {
+        s.truncate(2000);
+    }
+    let ctx = format!(
+        "Context (top matches from local code index):\n\n```text\n{}\n```\n\nUse the above only if relevant.",
+        s
+    );
+
+    // Build a plain Markdown references list from header lines in the CLI output
+    // Header format per CLI: "[rank] score path:start-end (lang)"
+    let mut refs: Vec<String> = Vec::new();
+    for line in s.lines() {
+        let l = line.trim();
+        if l.starts_with('[') {
+            if let Some(pos) = l.find(']') {
+                let after = l[(pos + 1)..].trim();
+                if !after.is_empty() {
+                    refs.push(format!("- {}", after));
+                }
+            }
+            if refs.len() >= 5 {
+                break;
+            }
+        }
+    }
+    let refs_md = if refs.is_empty() {
+        String::new()
+    } else {
+        let mut md = String::from("References (retrieval):\n\n");
+        for r in refs { md.push_str(&r); md.push('\n'); }
+        md.push('\n');
+        md
+    };
+    Some((ctx, refs_md))
 }
