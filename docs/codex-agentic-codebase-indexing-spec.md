@@ -202,9 +202,9 @@ Phase 2 — ACP/TUI
 - [x] Extend `/status` panel to show index + analytics
 
 Phase 3 — Background Refresh (timer-based MVP in place; git-delta full rebuild)
-- [ ] Implement post-turn check + git-delta scan (timer-based delta implemented)
+- [x] Implement post-turn check + git-delta scan (timer-based delta implemented); quiet background build
 - [ ] Cap work per pass and add backoff
-- [x] Update manifest `last_refresh` after deltas
+- [x] Update manifest `last_refresh` after deltas; track `analytics.last_attempt_ts` (footer shows Checked …)
 
 Phase 4 — Enhancements
 - [x] Add `--model bge-large` (1024‑D) path
@@ -227,13 +227,14 @@ Phase 4 — Enhancements
   - Touchpoints:
     - Retrieval + refs: `codex-acp/src/agent.rs` (fetch + format in‑process)
     - Injection call site: `codex-acp/src/agent.rs` (before building `items`)
-  - TUI mirrors ACP gating/summary: when `top ≥ threshold`, it renders the single summary line above and a spacer; otherwise it shows nothing. Implementation: `codex-tui/src/chatwidget.rs` (`submit_user_message` + `fetch_retrieval_context_plus`).
-- Incremental indexing (git‑delta) is implemented in `codex-agentic/src/indexing/mod.rs` and currently performs rebuild‑and‑swap of flat vectors/meta. Background refresh is timer‑based (5 min).
+  - TUI mirrors ACP gating/summary: when `top ≥ threshold`, it renders a compact summary in the footer command bar; otherwise shows nothing. Implementation: `codex-tui/src/chatwidget.rs` (footer injection path).
+- Incremental indexing (git‑delta) is implemented in `codex-agentic/src/indexing/mod.rs` and currently performs rebuild‑and‑swap of flat vectors/meta. Background refresh is timer‑based (5 min) and quiet (no stdout).
 - Version installed: `codex-agentic 0.39.0‑apc.7`.
 - Env toggles:
   - `CODEX_INDEXING=0` disables auto build/refresh
-- `CODEX_INDEX_RETRIEVAL=0` disables retrieval injection (ACP + TUI)
-- `CODEX_INDEX_RETRIEVAL_THRESHOLD` adjusts the CI threshold (0.0–1.0; default `0.725`)
+  - `CODEX_INDEX_RETRIEVAL=0` disables retrieval injection (ACP + TUI)
+  - `CODEX_INDEX_RETRIEVAL_THRESHOLD` adjusts the CI threshold (0.0–1.0; default `0.725`)
+  - `CODEX_INDEX_REFRESH_MIN_SECS` sets the min interval for quiet background refresh checks (default 300s)
 
 ### Atomic Task Checklist (continuation)
 
@@ -247,13 +248,19 @@ Phase 2 — ACP/TUI
 - [x] ACP: in‑process retrieval (FastEmbed + mmap + rayon)
 - [x] ACP: compact summary + thresholded context injection
   - [ ] TUI: in‑process retrieval (FastEmbed + mmap + rayon)
-  - [x] TUI: compact summary before LLM; add spacer line
+  - [x] TUI: compact summary in footer; no chat spam
+  - [x] TUI: add `/index` and `/search` (shell out to codex-agentic)
 - [ ] Add CLI `index query --json` output for richer UI rendering
 
 Phase 3 — Refresh & Scheduling
 - [x] Replace 5‑min timer with post‑turn refresh trigger (git‑delta)
 - [ ] Cap work per pass (e.g., ≤1k chunks) and add backoff
-- [x] Update manifest `last_refresh` after deltas
+- [x] Update manifest `last_refresh` after deltas; track `last_attempt_ts` (footer shows “Indexed … • Checked …”)
+
+Phase 5 — About‑Codebase UX
+- [x] TUI: if a saved report exists, display it immediately (no LLM routing)
+- [x] TUI: when stale (>24h) or Git changed, auto‑refresh in the background (quiet turn), show progress/ready notices in footer (60s), no chat spam
+- [x] ACP: if a saved report exists, send it directly; `--refresh` required to rebuild
 
 Phase 4 — Enhancements
 - [ ] Token‑aware context budget using active model’s token limits
