@@ -257,6 +257,40 @@ codex-agentic index clean
   - `CODEX_INDEX_RETRIEVAL_THRESHOLD=<float>` — adjust confidence gate (default `0.725`).
   - `CODEX_INDEX_REFRESH_MIN_SECS=<u64>` — min seconds between post‑turn refresh attempts (default `300`).
 
+Ignore Patterns (.index-ignore)
+-------------------------------
+
+The indexer respects a repo‑local ignore file at `.index-ignore` (created automatically on first run with sensible defaults). The format is one glob‑like pattern per line; `*` and `?` are supported and lines starting with `#` are comments.
+
+Default entries include:
+
+```
+.*
+.git
+.codex
+.idea
+.vscode
+node_modules
+target
+dist
+build
+```
+
+Manage patterns via CLI:
+
+```bash
+# Show current patterns and the file path
+codex-agentic index ignore --list
+
+# Add/remove patterns (repeat flags to manage several entries)
+codex-agentic index ignore --add "*.min.js" --add ".cache/*"
+codex-agentic index ignore --remove "*.min.js"
+
+# Reset to defaults
+codex-agentic index ignore --reset --list
+```
+
+
 Notes
 - MVP focuses on correctness and UX. Index persistence is flat vectors + JSONL with atomic writes; HNSW graph storage is planned.
 - Chunking defaults to `auto` with a Rust tree‑sitter path; falls back to blank‑line blocks. A `lines` mode is available with `--chunk lines`.
