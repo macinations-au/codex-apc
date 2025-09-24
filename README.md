@@ -114,6 +114,20 @@ Example (two entries: repo launcher and the installed binary):
 Using Upstream Commands (The “cli” Bridge) + Local Search
 --------------------------------------------------------
 
+Local Code Search Index
+-----------------------
+
+- Engine
+  - Embeds with FastEmbed (BGE small/large) and builds an HNSW ANN graph.
+  - Files: `.codex/index/vectors.hnsw` (flat store), `.codex/index/vectors.hnsw.graph`, `.codex/index/vectors.hnsw.data`, `.codex/index/meta.jsonl`, `.codex/index/manifest.json`.
+- Build
+  - `codex-agentic index build --model bge-small` (or `bge-large`).
+- Query
+  - `codex-agentic index query "<text>" -k 8 --show-snippets` (TUI `/search` uses the same engine).
+- Confidence gating (CLI)
+  - Hides results when the top score < 0.60 and prints: `No information exists that matches the request.`
+  - Override with `CODEX_INDEX_RETRIEVAL_THRESHOLD=0.70`.
+
 codex-agentic includes the upstream Codex CLI. Use the `cli --` subcommand to pass commands straight through.
 
 ```bash

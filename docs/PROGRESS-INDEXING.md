@@ -1,6 +1,6 @@
 # Progress — Codebase Indexing (Local‑Only)
 
-Version: 0.39.0‑apc.7
+Version: 0.39.0‑apc.8
 
 What’s landed
 - CLI indexer with incremental git‑delta rebuild (flat vectors + meta, atomic swap)

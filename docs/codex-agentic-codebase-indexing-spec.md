@@ -219,7 +219,7 @@ Phase 4 — Enhancements
 - Keeps scope tight and portable; future-proofed with manifest versioning and modular components.
 
 
-### Carry‑Over Notes (as of 0.39.0‑apc.7)
+### Carry‑Over Notes (as of 0.39.0‑apc.8)
 - ACP retrieval is in‑process (FastEmbed OnceLock + mmap + rayon). Display/injection is gated by the top confidence (CI):
   - Default threshold: `0.725` (override via `CODEX_INDEX_RETRIEVAL_THRESHOLD`).
   - If `top < threshold`: do not show anything in chat and do not inject context into the LLM.
@@ -239,10 +239,12 @@ Phase 4 — Enhancements
 ### Atomic Task Checklist (continuation)
 
 Phase 1 — Core + CLI
-- [ ] Implement `IndexStore` using HNSW (hnsw_rs) with on‑disk persistence
-  - [ ] Build graph during `index build` (normalize vectors first)
+- [x] Implement `IndexStore` using HNSW (hnsw_rs) with on‑disk persistence
+- [x] Add CLI result gating: hide top < 0.60; message "No information exists that matches the request." (override with CODEX_INDEX_RETRIEVAL_THRESHOLD)
+
+  - [x] Build graph during `index build` (normalize vectors first)
   - [ ] Persist (bincode) + compaction/repair (`index doctor`)
-  - [ ] CLI query prefers HNSW (fallback to mmap scan)
+  - [x] CLI query prefers HNSW (fallback to mmap scan)
 
 Phase 2 — ACP/TUI
 - [x] ACP: in‑process retrieval (FastEmbed + mmap + rayon)
