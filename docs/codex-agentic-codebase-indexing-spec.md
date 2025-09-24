@@ -217,3 +217,56 @@ Phase 4 — Enhancements
 - Implements local, default-on indexing with safe persistence, verification, and analytics.
 - Delivers immediate value via CLI, with a clear path to ACP/TUI integration and incremental refresh.
 - Keeps scope tight and portable; future-proofed with manifest versioning and modular components.
+
+
+### Carry‑Over Notes (as of 0.39.0‑apc.7)
+- ACP retrieval is in‑process (FastEmbed OnceLock + mmap + rayon) with thresholded context injection (env `CODEX_INDEX_RETRIEVAL_THRESHOLD`, default 0.95) and an always‑visible references list.
+  - Touchpoints:
+    - Retrieval + refs: `codex-acp/src/agent.rs:1020` (function `fetch_retrieval_context`)
+    - Injection call site: `codex-acp/src/agent.rs:596` (before building `items`)
+- TUI shows Index in `/status` and uses shell‑out retrieval; in‑process path not yet ported.
+- Incremental indexing (git‑delta) is implemented in `codex-agentic/src/indexing/mod.rs` and currently performs rebuild‑and‑swap of flat vectors/meta. Background refresh is timer‑based (5 min).
+- Version installed: `codex-agentic 0.39.0‑apc.7`.
+- Env toggles:
+  - `CODEX_INDEXING=0` disables auto build/refresh
+  - `CODEX_INDEX_RETRIEVAL=0` disables retrieval injection
+  - `CODEX_INDEX_RETRIEVAL_THRESHOLD` adjusts confidence threshold (0.0–1.0)
+
+### Atomic Task Checklist (continuation)
+
+Phase 1 — Core + CLI
+- [ ] Implement `IndexStore` using HNSW (hnsw_rs) with on‑disk persistence
+  - [ ] Build graph during `index build` (normalize vectors first)
+  - [ ] Persist (bincode) + compaction/repair (`index doctor`)
+  - [ ] CLI query prefers HNSW (fallback to mmap scan)
+
+Phase 2 — ACP/TUI
+- [x] ACP: in‑process retrieval (FastEmbed + mmap + rayon)
+- [x] ACP: always show references summary; thresholded context injection
+- [ ] TUI: in‑process retrieval (FastEmbed + mmap + rayon)
+- [ ] TUI: show references summary before LLM; add spacer line
+- [ ] Add CLI `index query --json` output for richer UI rendering
+
+Phase 3 — Refresh & Scheduling
+- [ ] Replace 5‑min timer with post‑turn refresh trigger (git‑delta)
+- [ ] Cap work per pass (e.g., ≤1k chunks) and add backoff
+- [x] Update manifest `last_refresh` after deltas
+
+Phase 4 — Enhancements
+- [ ] Token‑aware context budget using active model’s token limits
+- [ ] Add second tree‑sitter grammar (TypeScript or Python) + fallback heuristics polish
+- [ ] Add small LRU cache for recent queries (avoid re‑scoring repeats)
+- [ ] Windows/symlink policy + long‑path handling
+- [ ] Unit tests (binary detection, chunkers, manifest I/O, analytics) + integration tests (build→query)
+- [ ] READMEs: user flags/env + `/status` fields + troubleshooting
+
+### Resume Pointers
+- HNSW integration entry points:
+  - Build: `codex-agentic/src/indexing/mod.rs` inside `fn build` after batch embed
+  - Query: same module’s `fn query` (add feature‑gated HNSW path)
+- TUI retrieval port:
+  - Injection point: `codex-tui/src/chatwidget.rs:~1218` (`submit_user_message`)
+  - Shared helpers can live in a small internal module or duplicated minimal code (avoid new crate).
+- ACP references style:
+  - The summary is plain markdown; if the client supports HTML, we can switch back to `<details><summary>` later.
+
