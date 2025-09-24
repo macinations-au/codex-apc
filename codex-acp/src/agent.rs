@@ -595,7 +595,10 @@ impl Agent for CodexAgent {
         let mut items: Vec<InputItem> = Vec::new();
         // Retrieval injection (local index) unless disabled
         if std::env::var("CODEX_INDEX_RETRIEVAL").map(|v| v=="0" || v.eq_ignore_ascii_case("off")).unwrap_or(false) == false {
-            if let Some(ctx) = fetch_retrieval_context(&args.prompt).await {
+            if let Some((ctx, refs_md)) = fetch_retrieval_context(&args.prompt).await {
+                let (tx, rx) = oneshot::channel();
+                self.send_message_chunk(&args.session_id, refs_md.into(), tx)?;
+                let _ = rx.await;
                 items.push(InputItem::Text { text: ctx });
             }
         }
@@ -1017,7 +1020,7 @@ impl Agent for CodexAgent {
 
 
 static EMBEDDER: OnceLock<std::sync::Mutex<fastembed::TextEmbedding>> = OnceLock::new();
-async fn fetch_retrieval_context(blocks: &Vec<ContentBlock>) -> Option<String> {
+async fn fetch_retrieval_context(blocks: &Vec<ContentBlock>) -> Option<(String, String)> {
     let mut q = String::new();
     for b in blocks { if let ContentBlock::Text(t) = b { if !q.is_empty() { q.push_str("
 "); } q.push_str(&t.text); } }
@@ -1064,13 +1067,23 @@ async fn fetch_retrieval_context(blocks: &Vec<ContentBlock>) -> Option<String> {
     }
     if count==0 { return None; }
     if out.len()>2000 { out.truncate(2000); }
-    Some(format!("Context (top matches from local code index):
+    let ctx = format!("Context (top matches from local code index):
 
 ```text
 {}
 ```
 
-Use the above only if relevant.", out))
+Use the above only if relevant.", out);
+    let mut list = String::new();
+    for line in ctx.lines() { if line.starts_with("[") { list.push_str("- "); list.push_str(line); list.push_str("
+"); } }
+    let refs_md = format!("<details><summary>References (high-confidence)</summary>
+<small>
+
+{}
+</small>
+</details>", list);
+    Some((ctx, refs_md))
 }
 fn load_vectors_mmap(p:&str)->Result<(Vec<u64>,Vec<f32>),()> { use std::fs::File; use std::io::Read; use memmap2::MmapOptions; let f=File::open(p).map_err(|_|())?; let mut r=std::io::BufReader::new(f); let mut b4=[0u8;4]; let mut b8=[0u8;8]; r.read_exact(&mut b4).map_err(|_|())?; r.read_exact(&mut b4).map_err(|_|())?; let dim=u32::from_le_bytes(b4) as usize; r.read_exact(&mut b8).map_err(|_|())?; let rows=u64::from_le_bytes(b8) as usize; let mut ids=Vec::with_capacity(rows); for _ in 0..rows { r.read_exact(&mut b8).map_err(|_|())?; ids.push(u64::from_le_bytes(b8)); } let f2=r.into_inner(); let mmap=unsafe{MmapOptions::new().map(&f2).map_err(|_|())?}; let start=4+4+8+rows*8; let bytes=&mmap[start..start+rows*dim*4]; let mut data=Vec::with_capacity(rows*dim); let mut i=0usize; while i<bytes.len(){ data.push(f32::from_le_bytes([bytes[i],bytes[i+1],bytes[i+2],bytes[i+3]])); i+=4;} Ok((ids,data)) }
 #[derive(serde::Deserialize)] struct MetaLite{ id:u64, path:String, start:usize, end:usize, lang:String, preview:String }
