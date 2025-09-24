@@ -423,7 +423,10 @@ impl ChatWidget {
 
         if self.background_about_rebuild_active {
             // We already saved the report via pending_about_save branch; just notify.
-            self.set_footer_notice("Codebase report ready".to_string(), std::time::Duration::from_secs(60));
+            self.set_footer_notice(
+                "Codebase report ready".to_string(),
+                std::time::Duration::from_secs(60),
+            );
             self.background_about_rebuild_active = false;
         }
 
@@ -1050,7 +1053,8 @@ impl ChatWidget {
                             let cfg = self.config.clone();
                             let tx = self.app_event_tx.clone();
                             tokio::spawn(async move {
-                                let out = crate::review_codebase::run_local_cli_capture(&cfg.cwd, args);
+                                let out =
+                                    crate::review_codebase::run_local_cli_capture(&cfg.cwd, args);
                                 let msg = format!("```text\n{}\n```", out);
                                 let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
                                 crate::markdown::append_markdown(&msg, &mut lines, &cfg);
@@ -1068,7 +1072,11 @@ impl ChatWidget {
                             }
                             let args = {
                                 // Note: do not shlex the query — pass as a single argument
-                                let mut v = vec!["index".to_string(), "query".to_string(), query.to_string()];
+                                let mut v = vec![
+                                    "index".to_string(),
+                                    "query".to_string(),
+                                    query.to_string(),
+                                ];
                                 if !query.contains("-k ") {
                                     v.push("-k".into());
                                     v.push("8".into());
@@ -1079,7 +1087,8 @@ impl ChatWidget {
                             let cfg = self.config.clone();
                             let tx = self.app_event_tx.clone();
                             tokio::spawn(async move {
-                                let out = crate::review_codebase::run_local_cli_capture(&cfg.cwd, args);
+                                let out =
+                                    crate::review_codebase::run_local_cli_capture(&cfg.cwd, args);
                                 let msg = format!("```text\n{}\n```", out);
                                 let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
                                 crate::markdown::append_markdown(&msg, &mut lines, &cfg);
@@ -1213,7 +1222,10 @@ impl ChatWidget {
                 let cfg = self.config.clone();
                 let tx = self.app_event_tx.clone();
                 tokio::spawn(async move {
-                    let out = crate::review_codebase::run_local_cli_capture(&cfg.cwd, vec!["index".into(), "status".into()]);
+                    let out = crate::review_codebase::run_local_cli_capture(
+                        &cfg.cwd,
+                        vec!["index".into(), "status".into()],
+                    );
                     let msg = format!("```text\n{}\n```", out);
                     let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
                     crate::markdown::append_markdown(&msg, &mut lines, &cfg);
@@ -2165,15 +2177,21 @@ fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
     const THRESHOLD: f32 = 0.725;
     for line in s.lines() {
         let l = line.trim();
-        if !l.starts_with('[') { continue; }
+        if !l.starts_with('[') {
+            continue;
+        }
         // expected: "[rank] <score> <path>:<start>-<end> (<lang>)"
         // parse score token after the first closing bracket
         if let Some(pos) = l.find(']') {
             let after = l[(pos + 1)..].trim();
             if let Some(score_tok) = after.split_whitespace().next() {
                 if let Ok(sc) = score_tok.parse::<f32>() {
-                    if top_score.is_none() { top_score = Some(sc); }
-                    if sc >= THRESHOLD { found += 1; }
+                    if top_score.is_none() {
+                        top_score = Some(sc);
+                    }
+                    if sc >= THRESHOLD {
+                        found += 1;
+                    }
                 }
             }
         }
@@ -2238,15 +2256,20 @@ impl ChatWidget {
             Err(_) => {
                 // Fallback: call CLI `index status` and parse relative age.
                 if let Ok(out) = StdCommand::new("codex-agentic")
-                    .arg("index").arg("status")
+                    .arg("index")
+                    .arg("status")
                     .output()
                 {
                     if out.status.success() {
                         let s = String::from_utf8_lossy(&out.stdout);
-                        if let Some(line) = s.lines().find(|l| l.trim_start().starts_with("Last indexed:")) {
+                        if let Some(line) = s
+                            .lines()
+                            .find(|l| l.trim_start().starts_with("Last indexed:"))
+                        {
                             let rel = line.trim_start().trim_start_matches("Last indexed:").trim();
                             if !rel.is_empty() {
-                                self.bottom_pane.set_index_last_updated(Some(format!("Indexed {}", rel)));
+                                self.bottom_pane
+                                    .set_index_last_updated(Some(format!("Indexed {}", rel)));
                                 return;
                             }
                         }
@@ -2258,8 +2281,11 @@ impl ChatWidget {
         };
         let last = match serde_json::from_str::<serde_json::Value>(&text)
             .ok()
-            .and_then(|v| v.get("last_refresh").and_then(|x| x.as_str()).map(|s| s.to_string()))
-        {
+            .and_then(|v| {
+                v.get("last_refresh")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string())
+            }) {
             Some(s) => s,
             None => {
                 self.bottom_pane.set_index_last_updated(None);
@@ -2269,7 +2295,10 @@ impl ChatWidget {
         let idx_rel = compute_relative_age(&last);
         // Also attempt to read analytics.json for last_attempt_ts
         let mut attempt_rel: Option<String> = None;
-        let ap = p.parent().map(|d| d.join("analytics.json")).unwrap_or_else(|| PathBuf::from(".codex/index/analytics.json"));
+        let ap = p
+            .parent()
+            .map(|d| d.join("analytics.json"))
+            .unwrap_or_else(|| PathBuf::from(".codex/index/analytics.json"));
         if let Ok(at) = std::fs::read_to_string(&ap) {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&at) {
                 if let Some(ts) = val.get("last_attempt_ts").and_then(|x| x.as_str()) {
@@ -2306,7 +2335,9 @@ fn maybe_trigger_post_turn_index_refresh() {
         return;
     }
     let now = std::time::Instant::now();
-    let gate = LAST_RUN.get_or_init(|| Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(min_secs + 1)));
+    let gate = LAST_RUN.get_or_init(|| {
+        Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(min_secs + 1))
+    });
     if let Ok(mut last) = gate.lock() {
         if now.duration_since(*last).as_secs() < min_secs {
             return;

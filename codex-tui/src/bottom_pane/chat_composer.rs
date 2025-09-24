@@ -65,7 +65,7 @@ struct AttachedImage {
     path: PathBuf,
 }
 
-    pub(crate) struct ChatComposer {
+pub(crate) struct ChatComposer {
     textarea: TextArea,
     textarea_state: RefCell<TextAreaState>,
     active_popup: ActivePopup,
@@ -77,9 +77,9 @@ struct AttachedImage {
     dismissed_file_popup_token: Option<String>,
     current_file_query: Option<String>,
     pending_pastes: Vec<(String, String)>,
-        token_usage_info: Option<TokenUsageInfo>,
-        index_status: Option<String>,
-        index_last_updated: Option<String>,
+    token_usage_info: Option<TokenUsageInfo>,
+    index_status: Option<String>,
+    index_last_updated: Option<String>,
     has_focus: bool,
     attached_images: Vec<AttachedImage>,
     placeholder_text: String,
@@ -142,7 +142,11 @@ impl ChatComposer {
 
     pub fn desired_height(&self, width: u16) -> u16 {
         // Leave 1 column for the left border and 1 column for left padding
-        let hint_lines = if self.index_last_updated.is_some() { 2 } else { 1 };
+        let hint_lines = if self.index_last_updated.is_some() || self.index_status.is_some() {
+            2
+        } else {
+            1
+        };
         let footer_height_with_hint = hint_lines + FOOTER_SPACING_HEIGHT;
         self.textarea
             .desired_height(width.saturating_sub(LIVE_PREFIX_COLS))
@@ -1269,7 +1273,11 @@ impl WidgetRef for ChatComposer {
             ),
             ActivePopup::File(popup) => (Constraint::Max(popup.calculate_required_height()), 0),
             ActivePopup::None => {
-                let hint_lines = if self.index_last_updated.is_some() { 2 } else { 1 };
+                let hint_lines = if self.index_last_updated.is_some() {
+                    2
+                } else {
+                    1
+                };
                 (
                     Constraint::Length(hint_lines + FOOTER_SPACING_HEIGHT),
                     FOOTER_SPACING_HEIGHT,
@@ -1289,7 +1297,11 @@ impl WidgetRef for ChatComposer {
                 let hint_rect = if hint_spacing > 0 {
                     let [_, hint_rect] = Layout::vertical([
                         Constraint::Length(hint_spacing),
-                        Constraint::Length(if self.index_last_updated.is_some() { 2 } else { 1 }),
+                        Constraint::Length(if self.index_last_updated.is_some() {
+                            2
+                        } else {
+                            1
+                        }),
                     ])
                     .areas(popup_rect);
                     hint_rect
@@ -1363,21 +1375,25 @@ impl WidgetRef for ChatComposer {
                     }
                 }
 
-                // Append compact index status if present, e.g., "> 76% -- 3 items found".
-                if let Some(ref idx) = self.index_status {
-                    hint.push("   ".into());
-                    hint.push(Span::from(idx.clone()).style(Style::default().add_modifier(Modifier::DIM)));
-                }
-
                 // Split footer hints area into one or two rows.
-                if self.index_last_updated.is_some() {
+                if self.index_last_updated.is_some() || self.index_status.is_some() {
                     let [row1, row2] =
                         Layout::vertical([Constraint::Length(1), Constraint::Length(1)])
                             .areas(hint_rect);
                     Line::from(hint)
                         .style(Style::default().dim())
                         .render_ref(row1, buf);
-                    Line::from(self.index_last_updated.clone().unwrap_or_default())
+                    let mut line2 = String::new();
+                    if let Some(ref updated) = self.index_last_updated {
+                        line2.push_str(updated);
+                    }
+                    if let Some(ref idx) = self.index_status {
+                        if !line2.is_empty() {
+                            line2.push_str("   ");
+                        }
+                        line2.push_str(idx);
+                    }
+                    Line::from(line2)
                         .style(Style::default().fg(Color::Cyan))
                         .render_ref(row2, buf);
                 } else {
