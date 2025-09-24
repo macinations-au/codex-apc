@@ -251,7 +251,7 @@ Phase 2 — ACP/TUI
 - [ ] Add CLI `index query --json` output for richer UI rendering
 
 Phase 3 — Refresh & Scheduling
-- [ ] Replace 5‑min timer with post‑turn refresh trigger (git‑delta)
+- [x] Replace 5‑min timer with post‑turn refresh trigger (git‑delta)
 - [ ] Cap work per pass (e.g., ≤1k chunks) and add backoff
 - [x] Update manifest `last_refresh` after deltas
 
@@ -272,3 +272,6 @@ Phase 4 — Enhancements
   - Shared helpers can live in a small internal module or duplicated minimal code (avoid new crate).
 - ACP references style:
   - The summary is plain markdown; if the client supports HTML, we can switch back to `<details><summary>` later.
+
+Config notes (refresh)
+- `CODEX_INDEX_REFRESH_MIN_SECS` — minimum seconds between post‑turn refresh attempts (default 300). Set to a larger number to reduce background work; set to 0 to attempt on every turn (not recommended).
