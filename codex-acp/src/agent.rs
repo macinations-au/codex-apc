@@ -1049,45 +1049,50 @@ async fn fetch_retrieval_context(cwd: &Path, blocks: &Vec<ContentBlock>) -> Opti
         let base=i*dim; let mut dot=0f32; for j in 0..dim { dot+=qv[j]*data[base+j]; } (i,dot)
     }).collect();
     scores.par_sort_unstable_by(|a,b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    // Only inject when top score >= threshold (default 0.95)
+    // Threshold for context injection (default 0.95). Always show references summary.
     let threshold: f32 = std::env::var("CODEX_INDEX_RETRIEVAL_THRESHOLD")
         .ok()
         .and_then(|s| s.parse::<f32>().ok())
         .unwrap_or(0.95);
-    if scores.first().map(|(_,s)| *s).unwrap_or(0.0) < threshold { return None; }
 
-    let mut out=String::from("High-confidence matches (>=95%):
+    // Build plain markdown references list (top 5)
+    let mut refs_list = String::from("References (retrieval):
+
 ");
-    let mut count=0usize;
-    for (rank,(i,score)) in scores.into_iter().take_while(|(_,s)| *s >= threshold).take(5).enumerate() {
-        let id=ids[i]; if let Some(r)=meta.get(&id) {
-            out.push_str(&format!("[{rank}] {score:.3} {}:{}-{} ({})
-", r.path, r.start, r.end, r.lang));
-            let mut prev=r.preview.clone(); if prev.len()>600 { prev.truncate(600); }
-            out.push_str(&prev); out.push_str("
----
-");
-            count+=1;
+    for (rank,(i,score)) in scores.iter().cloned().take(5).enumerate() {
+        let id = ids[i];
+        if let Some(r) = meta.get(&id) {
+            refs_list.push_str(&format!("- [{:.3}] {}:{}-{} ({})
+", score, r.path, r.start, r.end, r.lang));
         }
     }
-    if count==0 { return None; }
-    if out.len()>2000 { out.truncate(2000); }
-    let ctx = format!("Context (top matches from local code index):
+
+    // Only craft context block when the top score clears threshold
+    let top = scores.first().map(|(_,s)| *s).unwrap_or(0.0);
+    let ctx = if top >= threshold {
+        let mut out = String::new();
+        for (rank,(i,score)) in scores.into_iter().take_while(|(_,s)| *s >= threshold).take(5).enumerate() {
+            let id=ids[i]; if let Some(r)=meta.get(&id) {
+                out.push_str(&format!("[{rank}] {score:.3} {}:{}-{} ({})
+", r.path, r.start, r.end, r.lang));
+                let mut prev=r.preview.clone(); if prev.len()>600 { prev.truncate(600); }
+                out.push_str(&prev); out.push_str("
+---
+");
+            }
+        }
+        if out.len()>2000 { out.truncate(2000); }
+        format!("Context (top matches from local code index):
 
 ```text
 {}
 ```
 
-Use the above only if relevant.", out);
-    let mut list = String::new();
-    for line in ctx.lines() { if line.starts_with("[") { list.push_str("- "); list.push_str(line); list.push_str("
-"); } }
-    let refs_md = format!("<details><summary>References (high-confidence)</summary>
-<small>
+Use the above only if relevant.", out)
+    } else { String::new() };
 
-{}
-</small>
-</details>", list);
+    let refs_md = refs_list;
+    Some((ctx.clone(), refs_md.clone()));
     Some((ctx, refs_md))
 }
 fn load_vectors_mmap(p:&Path)->Result<(Vec<u64>,Vec<f32>),()> { use std::fs::File; use std::io::Read; use memmap2::MmapOptions; let f=File::open(p).map_err(|_|())?; let mut r=std::io::BufReader::new(f); let mut b4=[0u8;4]; let mut b8=[0u8;8]; r.read_exact(&mut b4).map_err(|_|())?; r.read_exact(&mut b4).map_err(|_|())?; let dim=u32::from_le_bytes(b4) as usize; r.read_exact(&mut b8).map_err(|_|())?; let rows=u64::from_le_bytes(b8) as usize; let mut ids=Vec::with_capacity(rows); for _ in 0..rows { r.read_exact(&mut b8).map_err(|_|())?; ids.push(u64::from_le_bytes(b8)); } let f2=r.into_inner(); let mmap=unsafe{MmapOptions::new().map(&f2).map_err(|_|())?}; let start=4+4+8+rows*8; let bytes=&mmap[start..start+rows*dim*4]; let mut data=Vec::with_capacity(rows*dim); let mut i=0usize; while i<bytes.len(){ data.push(f32::from_le_bytes([bytes[i],bytes[i+1],bytes[i+2],bytes[i+3]])); i+=4;} Ok((ids,data)) }
