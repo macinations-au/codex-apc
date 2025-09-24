@@ -237,6 +237,12 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    /// Update the compact index status shown in the footer hint row.
+    pub(crate) fn set_index_status(&mut self, status: Option<String>) {
+        self.composer.set_index_status(status);
+        self.request_redraw();
+    }
+
     /// Replace the composer text with `text`.
     pub(crate) fn set_composer_text(&mut self, text: String) {
         self.composer.set_text_content(text);

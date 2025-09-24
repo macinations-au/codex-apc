@@ -1229,19 +1229,14 @@ impl ChatWidget {
             .unwrap_or(false)
             == false
         {
-            if let Some((ctx, refs_md)) = fetch_retrieval_context_plus(&text) {
-                // Show the references summary in the transcript before the model reply,
-                // then add a spacer line so the first assistant tokens begin on a new line.
-                let mut rendered: Vec<ratatui::text::Line<'static>> = Vec::new();
-                crate::markdown::append_markdown(&refs_md, &mut rendered, &self.config);
-                let body_cell = history_cell::AgentMessageCell::new(rendered, false);
-                self.add_to_history(body_cell);
-                // Explicit spacer line
-                let spacer = history_cell::AgentMessageCell::new(vec!["".into()], false);
-                self.add_to_history(spacer);
-
+            if let Some((ctx, summary)) = fetch_retrieval_context_plus(&text) {
+                // Display compact index status in the footer (not in the chat history).
+                self.bottom_pane.set_index_status(Some(summary));
                 // Inject the detailed context into the model input.
                 items.push(InputItem::Text { text: ctx });
+            } else {
+                // Clear any previous index status if we didn't use retrieval.
+                self.bottom_pane.set_index_status(None);
             }
         }
         if !text.is_empty() {

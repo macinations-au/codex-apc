@@ -629,22 +629,9 @@ impl Agent for CodexAgent {
             .unwrap_or(false)
             == false
         {
-            if let Some((ctx, refs_md)) =
+            if let Some((ctx, _refs_md)) =
                 fetch_retrieval_context(&self.config.cwd, &args.prompt).await
             {
-                // Emit the references summary before handing off to the LLM.
-                // Ensure there is a blank line separating the list from the
-                // upcoming assistant response so the first tokens do not render
-                // as part of the last bullet item.
-                let (tx, rx) = oneshot::channel();
-                self.send_message_chunk(&args.session_id, refs_md.into(), tx)?;
-                let _ = rx.await;
-
-                // Explicit paragraph break after the references list.
-                let (tx, rx) = oneshot::channel();
-                self.send_message_chunk(&args.session_id, "\n\n".into(), tx)?;
-                let _ = rx.await;
-
                 items.push(InputItem::Text { text: ctx });
             }
         }

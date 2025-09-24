@@ -65,7 +65,7 @@ struct AttachedImage {
     path: PathBuf,
 }
 
-pub(crate) struct ChatComposer {
+    pub(crate) struct ChatComposer {
     textarea: TextArea,
     textarea_state: RefCell<TextAreaState>,
     active_popup: ActivePopup,
@@ -77,7 +77,8 @@ pub(crate) struct ChatComposer {
     dismissed_file_popup_token: Option<String>,
     current_file_query: Option<String>,
     pending_pastes: Vec<(String, String)>,
-    token_usage_info: Option<TokenUsageInfo>,
+        token_usage_info: Option<TokenUsageInfo>,
+        index_status: Option<String>,
     has_focus: bool,
     attached_images: Vec<AttachedImage>,
     placeholder_text: String,
@@ -123,6 +124,7 @@ impl ChatComposer {
             current_file_query: None,
             pending_pastes: Vec::new(),
             token_usage_info: None,
+            index_status: None,
             has_focus: has_input_focus,
             attached_images: Vec::new(),
             placeholder_text,
@@ -175,6 +177,11 @@ impl ChatComposer {
     /// context when the composer is empty.
     pub(crate) fn set_token_usage(&mut self, token_info: Option<TokenUsageInfo>) {
         self.token_usage_info = token_info;
+    }
+
+    /// Set/clear the compact index status shown in the footer hint row.
+    pub(crate) fn set_index_status(&mut self, status: Option<String>) {
+        self.index_status = status;
     }
 
     /// Record the history metadata advertised by `SessionConfiguredEvent` so
@@ -1342,6 +1349,12 @@ impl WidgetRef for ChatComposer {
                             context_style,
                         ));
                     }
+                }
+
+                // Append compact index status if present, e.g., "> 76% -- 3 items found".
+                if let Some(ref idx) = self.index_status {
+                    hint.push("   ".into());
+                    hint.push(Span::from(idx.clone()).style(Style::default().add_modifier(Modifier::DIM)));
                 }
 
                 Line::from(hint)
