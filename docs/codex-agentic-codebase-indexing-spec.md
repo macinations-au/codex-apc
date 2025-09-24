@@ -220,17 +220,20 @@ Phase 4 — Enhancements
 
 
 ### Carry‑Over Notes (as of 0.39.0‑apc.7)
-- ACP retrieval is in‑process (FastEmbed OnceLock + mmap + rayon) with thresholded context injection (env `CODEX_INDEX_RETRIEVAL_THRESHOLD`, default 0.95) and an always‑visible references list.
+- ACP retrieval is in‑process (FastEmbed OnceLock + mmap + rayon). Display/injection is gated by the top confidence (CI):
+  - Default threshold: `0.725` (override via `CODEX_INDEX_RETRIEVAL_THRESHOLD`).
+  - If `top < threshold`: do not show anything in chat and do not inject context into the LLM.
+  - If `top ≥ threshold`: inject context and show a compact summary line only: `> [CF%] -- # items found` (CF = `round(top*100)`).
   - Touchpoints:
     - Retrieval + refs: `codex-acp/src/agent.rs` (fetch + format in‑process)
     - Injection call site: `codex-acp/src/agent.rs` (before building `items`)
-  - TUI now mirrors the ACP references UX: displays a "References (retrieval)" list before the LLM response and inserts a spacer line so the reply starts on the next line. Implementation: `codex-tui/src/chatwidget.rs` (`submit_user_message` + `fetch_retrieval_context_plus`).
+  - TUI mirrors ACP gating/summary: when `top ≥ threshold`, it renders the single summary line above and a spacer; otherwise it shows nothing. Implementation: `codex-tui/src/chatwidget.rs` (`submit_user_message` + `fetch_retrieval_context_plus`).
 - Incremental indexing (git‑delta) is implemented in `codex-agentic/src/indexing/mod.rs` and currently performs rebuild‑and‑swap of flat vectors/meta. Background refresh is timer‑based (5 min).
 - Version installed: `codex-agentic 0.39.0‑apc.7`.
 - Env toggles:
   - `CODEX_INDEXING=0` disables auto build/refresh
-  - `CODEX_INDEX_RETRIEVAL=0` disables retrieval injection (ACP + TUI)
-  - `CODEX_INDEX_RETRIEVAL_THRESHOLD` adjusts confidence threshold (0.0–1.0)
+- `CODEX_INDEX_RETRIEVAL=0` disables retrieval injection (ACP + TUI)
+- `CODEX_INDEX_RETRIEVAL_THRESHOLD` adjusts the CI threshold (0.0–1.0; default `0.725`)
 
 ### Atomic Task Checklist (continuation)
 
@@ -242,9 +245,9 @@ Phase 1 — Core + CLI
 
 Phase 2 — ACP/TUI
 - [x] ACP: in‑process retrieval (FastEmbed + mmap + rayon)
-- [x] ACP: always show references summary; thresholded context injection
+- [x] ACP: compact summary + thresholded context injection
   - [ ] TUI: in‑process retrieval (FastEmbed + mmap + rayon)
-  - [x] TUI: show references summary before LLM; add spacer line
+  - [x] TUI: compact summary before LLM; add spacer line
 - [ ] Add CLI `index query --json` output for richer UI rendering
 
 Phase 3 — Refresh & Scheduling
