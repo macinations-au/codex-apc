@@ -1378,7 +1378,7 @@ impl WidgetRef for ChatComposer {
                         .style(Style::default().dim())
                         .render_ref(row1, buf);
                     Line::from(self.index_last_updated.clone().unwrap_or_default())
-                        .style(Style::default().add_modifier(Modifier::DIM))
+                        .style(Style::default().fg(Color::Cyan))
                         .render_ref(row2, buf);
                 } else {
                     Line::from(hint)

@@ -27,21 +27,22 @@ Install
 Run
 ---
 
-- `codex-agentic` defaults to the CLI and supports `--acp` for ACP:
+- `codex-agentic` provides a TUI by default and an ACP (editor) mode:
 
 ```bash
-# CLI (upstream) mode
-codex-agentic [upstream-cli-args]
+# TUI (terminal UI, default)
+codex-agentic
 
-# ACP mode (for IDEs)
-codex-agentic --acp
+# ACP (Agent Client Protocol) server for IDEs
+codex-agentic acp
 ```
 
 Key features in this distribution
-- Single binary: CLI by default; pass `--acp` to run as an ACP server in IDEs.
+- Two modes: TUI (terminal UI) and ACP (editor/stdio server for IDEs like Zed).
 - Reasoning view control for both modes: `--reasoning hidden|summary|raw`.
 - CLI model picker shows local Ollama models; model picks can persist, provider never does.
 - No default heavy model is auto‑pulled in OSS mode.
+ - TUI shows compact index status and supports `/index` and `/search` alongside ACP.
 
 Examples
 - Minimal CLI session
@@ -87,6 +88,36 @@ Slash commands (high‑use)
 - `/approvals <policy>` — `untrusted | on-request | on-failure | never`
 - `/reasoning <hidden|summary|raw>` — collapse or show “thinking”
 - `/init` — scaffold an AGENTS.md in the workspace
+
+Indexing (Local Search)
+-----------------------
+
+- Available by default (automatic opt‑in). On first run in a repo, a best‑effort background build prepares a local semantic index used for code search and retrieval.
+- Opt‑out from the command line (this run only):
+
+```bash
+# Disable indexing for a CLI/TUI run
+CODEX_INDEXING=0 codex-agentic
+
+# Disable indexing for ACP (editor) mode
+CODEX_INDEXING=0 codex-agentic acp
+```
+
+- Where it lives: `.codex/index/` at your project root, containing `manifest.json`, `vectors.hnsw`, `meta.jsonl`, and `analytics.json`.
+- Related controls:
+  - Disable retrieval injection only: `CODEX_INDEX_RETRIEVAL=0`.
+  - Adjust retrieval confidence gate: `CODEX_INDEX_RETRIEVAL_THRESHOLD=0.725` (default).
+  - Post‑turn refresh backoff: `CODEX_INDEX_REFRESH_MIN_SECS=300` (default).
+
+Helpful commands
+
+```bash
+# Status / Build / Query / Clean
+codex-agentic index status
+codex-agentic index build [--model bge-small|bge-large]
+codex-agentic index query "<text>" -k 8 --show-snippets
+codex-agentic index clean
+```
 
 Notes
 - Custom prompts under your Codex prompts directory are auto‑discovered and appear as additional commands.

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand, Args};
+use clap::{Parser, Subcommand, Args, ValueEnum};
 use codex_core::config::ConfigOverrides as CoreConfigOverrides;
 use codex_core::protocol::AskForApproval;
 use codex_protocol::config_types::SandboxMode as SandboxModeCfg;
@@ -83,9 +83,24 @@ enum Cmd {
     /// Print common examples and config recipes
     #[command(name = "help-recipes")]
     HelpRecipes,
+    /// Resume a previous session (picker, last, or by id) while allowing normal flags
+    #[command(
+        about = "Resume a previous session",
+        long_about = "Resume a recorded session. With no SESSION_ID and no --last, shows a picker.\n\nFlags like --yolo-with-search and --search are forwarded to the chat session.",
+        after_help = "Examples:\n  codex-agentic resume\n  codex-agentic resume --last\n  codex-agentic resume <SESSION_ID>\n  codex-agentic resume --yolo --search\n  codex-agentic resume --last --yolo --search"
+    )]
+    Resume(ResumeArgs),
     /// Local codebase indexing (build/query/status/verify/clean)
     #[command(subcommand)]
     Index(IndexCmd),
+    /// Semantic search in the local codebase (same engine as TUI `/search`)
+    #[command(
+        name = "search-code",
+        about = "Search the local codebase (same as TUI /search)",
+        long_about = "Runs a local semantic search over the repository index. Matches the behavior of the TUI /search command.",
+        alias = "search"
+    )]
+    SearchCode(SearchCodeArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -142,6 +157,65 @@ struct IndexQueryArgs {
     /// Print snippet previews
     #[arg(long = "show-snippets")]
     show_snippets: bool,
+    /// Output format: text | json | xml
+    #[arg(long = "output", value_enum, default_value_t = OutputFormatArg::Text)]
+    output: OutputFormatArg,
+    /// Disable line numbers in snippets
+    #[arg(long = "no-line-numbers", default_value_t = false)]
+    no_line_numbers: bool,
+    /// Line number column width
+    #[arg(long = "line-number-width", default_value_t = 6)]
+    line_number_width: usize,
+    /// Show diff-style "+ " prefix for snippet lines
+    #[arg(long = "diff", default_value_t = false)]
+    diff: bool,
+}
+
+
+#[derive(Args, Debug, Clone)]
+struct SearchCodeArgs {
+    /// Free-text query
+    query: String,
+    /// Top-K results
+    #[arg(short = 'k', long = "k", default_value_t = 8)]
+    k: usize,
+    /// Print snippet previews
+    #[arg(long = "show-snippets")]
+    show_snippets: bool,
+    /// Output format: text | json | xml
+    #[arg(long = "output", value_enum, default_value_t = OutputFormatArg::Text)]
+    output: OutputFormatArg,
+    /// Disable line numbers in snippets
+    #[arg(long = "no-line-numbers", default_value_t = false)]
+    no_line_numbers: bool,
+    /// Line number column width
+    #[arg(long = "line-number-width", default_value_t = 6)]
+    line_number_width: usize,
+    /// Show diff-style "+ " prefix for snippet lines
+    #[arg(long = "diff", default_value_t = false)]
+    diff: bool,
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+enum OutputFormatArg {
+    Text,
+    Json,
+    Xml,
+}
+
+
+
+#[derive(Args, Debug, Clone)]
+struct ResumeArgs {
+    /// Resume the most recent session
+    #[arg(long = "last")]
+    last: bool,
+    /// Specific session id to resume
+    #[arg(value_name = "SESSION_ID")]
+    session_id: Option<String>,
+    /// Additional flags forwarded to the embedded CLI (e.g., --yolo, --search)
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    rest: Vec<OsString>,
 }
 
 fn main() -> Result<()> {
@@ -149,6 +223,25 @@ fn main() -> Result<()> {
 
     if let Some(cmd) = &cli.cmd {
         match cmd {
+            Cmd::SearchCode(SearchCodeArgs { query, k, show_snippets, output, no_line_numbers, line_number_width, diff }) => {
+                let args = IndexQueryArgs { query: query.to_string(), k: *k, show_snippets: *show_snippets, output: output.clone(), no_line_numbers: *no_line_numbers, line_number_width: *line_number_width, diff: *diff };
+                return indexing::dispatch(IndexCmd::Query(args));
+            }
+
+            Cmd::Resume(ResumeArgs { last, session_id, rest }) => {
+                // Build an argv that the embedded CLI understands, preserving flags order.
+                let mut forwarded: Vec<OsString> = Vec::with_capacity(2 + rest.len());
+                forwarded.push(OsString::from("resume"));
+                if *last {
+                    forwarded.push(OsString::from("--last"));
+                }
+                if let Some(id) = session_id.clone() {
+                    forwarded.push(OsString::from(id));
+                }
+                forwarded.extend(rest.iter().cloned());
+                return run_embedded_cli(&forwarded);
+            }
+
             Cmd::Acp {
                 model,
                 profile,
@@ -371,18 +464,29 @@ fn run_embedded_cli(args: &[OsString]) -> Result<()> {
             std::iter::once(OsString::from("codex-agentic")).chain(remaining_args.iter().cloned()),
         );
 
-        // Check for resume options
+        // Determine resume options from remaining args, allowing additional flags like
+        // --yolo / --search without misinterpreting them as a session id.
         if remaining_args.is_empty() {
             // No arguments after resume means picker
             cli.resume_picker = true;
-        } else if remaining_args.first().and_then(|s| s.to_str()) == Some("--last") {
+        } else if remaining_args
+            .iter()
+            .any(|s| s.to_str().is_some_and(|t| t == "--last"))
+        {
             cli.resume_last = true;
         } else {
-            // Assume it's a session ID
-            cli.resume_session_id = remaining_args
-                .first()
-                .and_then(|s| s.to_str())
+            // Find the first non-flag token; treat it as a session id if present.
+            let id_opt = remaining_args
+                .iter()
+                .filter_map(|s| s.to_str())
+                .find(|t| !t.starts_with('-'))
                 .map(String::from);
+            if id_opt.is_some() {
+                cli.resume_session_id = id_opt;
+            } else {
+                // Only flags after 'resume' → show picker
+                cli.resume_picker = true;
+            }
         }
         cli
     } else {
@@ -431,21 +535,30 @@ Quick Recipes
    codex-agentic acp --model gpt-4o-mini --model-reasoning-effort medium
 
 2) Use local Ollama provider + model
-   codex-agentic acp --oss -c model=\"qwq:latest\"
+   codex-agentic acp --oss -c model="qwq:latest"
 
 3) Safer auto-exec in workspace (no prompts on success)
-   codex-agentic acp -c ask_for_approval=\"on-failure\" -c sandbox_mode=\"workspace-write\"
+   codex-agentic acp -c ask_for_approval="on-failure" -c sandbox_mode="workspace-write"
 
 4) Hide reasoning completely
-   codex-agentic acp -c model_reasoning_summary=\"none\" -c hide_agent_reasoning=true
+   codex-agentic acp -c model_reasoning_summary="none" -c hide_agent_reasoning=true
 
 5) Set working directory
-   codex-agentic acp -c cwd=\"/path/to/project\"
+   codex-agentic acp -c cwd="/path/to/project"
 
 6) YOLO mode with search (DANGEROUS: no approvals, no sandbox)
    codex-agentic acp --yolo-with-search
 
-7) See full upstream CLI commands
+7) Resume a previous session (picker)
+   codex-agentic resume
+
+8) Resume most recent session with flags
+   codex-agentic resume --last --yolo --search
+
+9) Resume a specific session by id
+   codex-agentic resume <SESSION_ID> --search
+
+10) See full upstream CLI commands
    codex-agentic cli -- --help
 
 Hint

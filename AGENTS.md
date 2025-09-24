@@ -10,6 +10,11 @@ Scope
 - Match existing style and structure.
 - Prefer root‑cause fixes over band‑aids.
 - Ask before making destructive changes.
+- To aid in locating sources of code, a presearch result will be provided. It is highly recommended that you use that search result before you attempt to find other places of concern in the code.
+- To perform semantic search on the codebase run replace the query prompt with a natural language request eg 'where are the index status bar references ?' --> `codex-agentic search-code <query prompt> -k 8 --show-snippets --output json`
+- or - To just locate the files in the codebase run `codex-agentic search-code <query prompt> --output json` : example : `codex-agentic search-code "index status bar" -k 1 --show-snippets  --diff`
+- Once the changes have been implemented, always perform the release build and ** install ** in the global cargo bin for the user to test
+
 
 ## Formatting (Markdown)
 - Always respond in valid Markdown.
@@ -138,6 +143,27 @@ ls -lh ~/.cargo/bin/codex-agentic codex-agentic/target/release/codex-agentic
 - Markdown fixes: headings are sanitized to start on a new line; streaming also inserts a blank line before `#` if needed.
 - Avoid background readers in ACP: only one consumer should call `conversation.next_event()` at a time. Do not add background tasks that read conversation events.
 
+## Index‑First Code Navigation
+
+- When you need to locate code or files, use the local index first. Natural‑language search is often faster and more relevant than wildcard/pattern scans.
+- How to search quickly:
+
+```bash
+# In the TUI: type in the chat
+/search <what you’re looking for> [-k 8]
+
+# From a shell (CLI)
+codex-agentic index query "<natural language query>" -k 8 --show-snippets
+```
+
+- Fallback: if the index is missing, stale, or results are low confidence, use the standard approach (ripgrep/globs):
+
+```bash
+# Common ripgrep patterns (adjust globs as needed)
+rg -n --glob '!{target,node_modules,dist,build}' "ClassName|function_name|pattern" -S
+```
+
+- Index location: `.codex/index/` at the repo root (`manifest.json`, `vectors.hnsw`, `meta.jsonl`, `analytics.json`).
 
 ## Local Install/Sync (for quick testing)
 

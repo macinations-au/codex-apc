@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
@@ -608,6 +609,14 @@ fn update_analytics<F: FnOnce(Analytics) -> Analytics>(f: F) -> Result<()> {
     Ok(())
 }
 
+fn xml_escape(s: &str) -> String {
+    s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&apos;")
+}
+
 fn query(args: &crate::IndexQueryArgs) -> anyhow::Result<()> {
     let manifest: Manifest = serde_json::from_slice(&fs::read(idx_dir().join(MANIFEST_FILE))?)?;
     let (ids, data) = load_vectors(idx_dir().join(VECTORS_FILE))?;
@@ -626,20 +635,74 @@ fn query(args: &crate::IndexQueryArgs) -> anyhow::Result<()> {
         })
         .collect();
     scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut out_items: Vec<serde_json::Value> = Vec::new();
     for (rank, (i, score)) in scores.iter().take(k).enumerate() {
         let id = ids[*i];
         if let Some(row) = meta.get(&id) {
-            println!(
-                "[{rank}] {score:.3} {}:{}-{} ({})",
-                row.path, row.start, row.end, row.lang
-            );
-            if args.show_snippets {
-                println!(
-                    "{}
----",
-                    row.preview
-                );
+            let snippet_lines = if args.show_snippets { Some(row.preview.lines().collect::<Vec<_>>()) } else { None };
+            out_items.push(serde_json::json!({
+                "rank": rank,
+                "score": (*score as f64),
+                "path": row.path,
+                "start": row.start,
+                "end": row.end,
+                "lang": row.lang,
+                "snippet": snippet_lines,
+            }));
+        }
+    }
+
+    match args.output {
+        crate::OutputFormatArg::Text => {
+            for item in &out_items {
+                let rank = item["rank"].as_u64().unwrap_or(0);
+                let score = item["score"].as_f64().unwrap_or(0.0);
+                let path = item["path"].as_str().unwrap_or("");
+                let start = item["start"].as_u64().unwrap_or(0);
+                let end = item["end"].as_u64().unwrap_or(0);
+                let lang = item["lang"].as_str().unwrap_or("");
+                println!("[{rank}] {score:.3} {path}:{start}-{end} ({lang})");
+                if let Some(snippet) = item["snippet"].as_array() {
+                    let start_num = start as usize;
+                    for (i, line) in snippet.iter().filter_map(|v| v.as_str()).enumerate() {
+                        let prefix = if args.diff { "+ " } else { "" };
+                        if args.no_line_numbers { println!("{prefix}{line}"); } else { let ln = start_num.saturating_add(i); println!("{ln:>width$} | {prefix}{line}", width = args.line_number_width); }
+                    }
+                    println!("---");
+                }
             }
+        }
+        crate::OutputFormatArg::Json => {
+            println!("{}", serde_json::to_string_pretty(&out_items).unwrap());
+        }
+        crate::OutputFormatArg::Xml => {
+            println!("<results>");
+            for item in &out_items {
+                let rank = item["rank"].as_u64().unwrap_or(0);
+                let score = item["score"].as_f64().unwrap_or(0.0);
+                let path = xml_escape(item["path"].as_str().unwrap_or(""));
+                let start = item["start"].as_u64().unwrap_or(0);
+                let end = item["end"].as_u64().unwrap_or(0);
+                let lang = xml_escape(item["lang"].as_str().unwrap_or(""));
+                println!(r#"  <hit rank="{rank}" score="{score:.3}" path="{path}" start="{start}" end="{end}" lang="{lang}">"#);
+                if let Some(snippet) = item["snippet"].as_array() {
+                    println!("    <snippet>");
+                    let start_num = start as usize;
+                    for (i, line) in snippet.iter().filter_map(|v| v.as_str()).enumerate() {
+                        let ln = start_num.saturating_add(i);
+                        if args.no_line_numbers {
+                        if args.diff { println!("      <line op=\"add\">{}</line>", xml_escape(line)); } else { println!("      <line>{}</line>", xml_escape(line)); }
+                    } else {
+                        if args.diff { println!("      <line n=\"{ln}\" op=\"add\">{}</line>", xml_escape(line)); } else { println!("      <line n=\"{ln}\">{}</line>", xml_escape(line)); }
+                    }
+                    }
+                    println!("    </snippet>
+  </hit>");
+                } else {
+                    println!("  </hit>");
+                }
+            }
+            println!("</results>");
         }
     }
     update_analytics(|mut a| {
