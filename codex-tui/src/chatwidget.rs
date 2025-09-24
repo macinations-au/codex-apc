@@ -2242,11 +2242,27 @@ impl ChatWidget {
                 return;
             }
         };
-        if let Some(rel) = compute_relative_age(&last) {
-            self.bottom_pane
-                .set_index_last_updated(Some(format!("Indexed {}", rel)));
-        } else {
+        let idx_rel = compute_relative_age(&last);
+        // Also attempt to read analytics.json for last_attempt_ts
+        let mut attempt_rel: Option<String> = None;
+        let ap = p.parent().map(|d| d.join("analytics.json")).unwrap_or_else(|| PathBuf::from(".codex/index/analytics.json"));
+        if let Ok(at) = std::fs::read_to_string(&ap) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&at) {
+                if let Some(ts) = val.get("last_attempt_ts").and_then(|x| x.as_str()) {
+                    attempt_rel = compute_relative_age(ts);
+                }
+            }
+        }
+        let line = match (idx_rel, attempt_rel) {
+            (Some(i), Some(a)) => format!("Indexed {} • Checked {}", i, a),
+            (Some(i), None) => format!("Indexed {}", i),
+            (None, Some(a)) => format!("Checked {}", a),
+            _ => String::new(),
+        };
+        if line.is_empty() {
             self.bottom_pane.set_index_last_updated(None);
+        } else {
+            self.bottom_pane.set_index_last_updated(Some(line));
         }
     }
 }

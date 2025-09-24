@@ -70,6 +70,8 @@ struct Analytics {
     hits: u64,
     misses: u64,
     last_query_ts: Option<String>,
+    // New: last time a background or manual index attempt/check ran
+    last_attempt_ts: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,6 +143,11 @@ pub fn spawn_periodic_maintenance() {
     std::thread::spawn(|| {
         loop {
             std::thread::sleep(std::time::Duration::from_secs(300)); // 5 minutes
+            // Record an attempt timestamp regardless of whether we rebuild.
+            let _ = update_analytics(|mut a| {
+                a.last_attempt_ts = Some(now_iso());
+                a
+            });
             let changed = git_has_changes();
             if changed {
                 let _ = build(&crate::IndexBuildArgs {
@@ -203,6 +210,11 @@ fn build(args: &crate::IndexBuildArgs) -> Result<()> {
         Ok(g) => Some(g),
         Err(_) => None,
     };
+    // Record an attempt timestamp (manual or scheduled)
+    let _ = update_analytics(|mut a| {
+        a.last_attempt_ts = Some(now_iso());
+        a
+    });
     // Quiet background refresh: do not print to stdout when called by the TUI/ACP.
     // Future: perform git-delta build and update manifest.last_refresh here.
     Ok(())
