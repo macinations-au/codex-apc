@@ -2130,12 +2130,33 @@ impl ChatWidget {
     fn refresh_index_last_updated_footer(&mut self) {
         use std::fs;
         use std::path::PathBuf;
-        let mut p = PathBuf::from(".codex/index/manifest.json");
-        let q = self.config.cwd.clone().join(".codex/index/manifest.json");
-        if q.exists() { p = q; }
+        // Try CWD-based location first, then local process directory.
+        let mut p = self.config.cwd.clone().join(".codex/index/manifest.json");
+        if !p.exists() {
+            let alt = PathBuf::from(".codex/index/manifest.json");
+            if alt.exists() {
+                p = alt;
+            }
+        }
         let text = match fs::read_to_string(&p) {
             Ok(s) => s,
             Err(_) => {
+                // Fallback: call CLI `index status` and parse relative age.
+                if let Ok(out) = StdCommand::new("codex-agentic")
+                    .arg("index").arg("status")
+                    .output()
+                {
+                    if out.status.success() {
+                        let s = String::from_utf8_lossy(&out.stdout);
+                        if let Some(line) = s.lines().find(|l| l.trim_start().starts_with("Last indexed:")) {
+                            let rel = line.trim_start().trim_start_matches("Last indexed:").trim();
+                            if !rel.is_empty() {
+                                self.bottom_pane.set_index_last_updated(Some(format!("Indexed {}", rel)));
+                                return;
+                            }
+                        }
+                    }
+                }
                 self.bottom_pane.set_index_last_updated(None);
                 return;
             }
