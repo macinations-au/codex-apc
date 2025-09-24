@@ -2062,6 +2062,30 @@ fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
     if s.trim().is_empty() {
         return None;
     }
+    // Determine top confidence and count of items over threshold from header lines
+    let mut top_score: Option<f32> = None;
+    let mut found: usize = 0;
+    const THRESHOLD: f32 = 0.725;
+    for line in s.lines() {
+        let l = line.trim();
+        if !l.starts_with('[') { continue; }
+        // expected: "[rank] <score> <path>:<start>-<end> (<lang>)"
+        // parse score token after the first closing bracket
+        if let Some(pos) = l.find(']') {
+            let after = l[(pos + 1)..].trim();
+            if let Some(score_tok) = after.split_whitespace().next() {
+                if let Ok(sc) = score_tok.parse::<f32>() {
+                    if top_score.is_none() { top_score = Some(sc); }
+                    if sc >= THRESHOLD { found += 1; }
+                }
+            }
+        }
+    }
+    let top = top_score.unwrap_or(0.0);
+    if top < THRESHOLD {
+        // Below confidence threshold: do not inject or display anything.
+        return None;
+    }
     // Build the detailed context block (trim for safety)
     if s.len() > 2000 {
         s.truncate(2000);
@@ -2070,31 +2094,8 @@ fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
         "Context (top matches from local code index):\n\n```text\n{}\n```\n\nUse the above only if relevant.",
         s
     );
-
-    // Build a plain Markdown references list from header lines in the CLI output
-    // Header format per CLI: "[rank] score path:start-end (lang)"
-    let mut refs: Vec<String> = Vec::new();
-    for line in s.lines() {
-        let l = line.trim();
-        if l.starts_with('[') {
-            if let Some(pos) = l.find(']') {
-                let after = l[(pos + 1)..].trim();
-                if !after.is_empty() {
-                    refs.push(format!("- {}", after));
-                }
-            }
-            if refs.len() >= 5 {
-                break;
-            }
-        }
-    }
-    let refs_md = if refs.is_empty() {
-        String::new()
-    } else {
-        let mut md = String::from("References (retrieval):\n\n");
-        for r in refs { md.push_str(&r); md.push('\n'); }
-        md.push('\n');
-        md
-    };
-    Some((ctx, refs_md))
+    // Compact UI summary: show highest confidence as percent and number of items found
+    let cf_pct = (top * 100.0).round();
+    let summary_md = format!("> {:.0}% -- {} items found\n\n", cf_pct, found);
+    Some((ctx, summary_md))
 }

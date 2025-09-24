@@ -1132,77 +1132,54 @@ async fn fetch_retrieval_context(
         })
         .collect();
     scores.par_sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    // Threshold for context injection (default 0.95). Always show references summary.
+    // Threshold for context injection and display (default 0.725).
+    // If top score is below this, do not inject or display anything.
     let threshold: f32 = std::env::var("CODEX_INDEX_RETRIEVAL_THRESHOLD")
         .ok()
         .and_then(|s| s.parse::<f32>().ok())
-        .unwrap_or(0.95);
-
-    // Build plain markdown references list (top 5)
-    let mut refs_list = String::from(
-        "References (retrieval):
-
-",
-    );
-    for (rank, (i, score)) in scores.iter().cloned().take(5).enumerate() {
-        let id = ids[i];
-        if let Some(r) = meta.get(&id) {
-            refs_list.push_str(&format!(
-                "- [{:.3}] {}:{}-{} ({})
-",
-                score, r.path, r.start, r.end, r.lang
-            ));
-        }
+        .unwrap_or(0.725);
+    // Compute quick stats and gate by threshold.
+    let top = scores.first().map(|(_, s)| *s).unwrap_or(0.0);
+    let found = scores
+        .iter()
+        .take_while(|(_, s)| *s >= threshold)
+        .count();
+    if top < threshold {
+        return None;
     }
 
-    // Only craft context block when the top score clears threshold
-    let top = scores.first().map(|(_, s)| *s).unwrap_or(0.0);
-    let ctx = if top >= threshold {
-        let mut out = String::new();
-        for (rank, (i, score)) in scores
-            .into_iter()
-            .take_while(|(_, s)| *s >= threshold)
-            .take(5)
-            .enumerate()
-        {
-            let id = ids[i];
-            if let Some(r) = meta.get(&id) {
-                out.push_str(&format!(
-                    "[{rank}] {score:.3} {}:{}-{} ({})
-",
-                    r.path, r.start, r.end, r.lang
-                ));
-                let mut prev = r.preview.clone();
-                if prev.len() > 600 {
-                    prev.truncate(600);
-                }
-                out.push_str(&prev);
-                out.push_str(
-                    "
----
-",
-                );
+    // Build detailed context for the model from top matches over threshold.
+    let mut out = String::new();
+    for (rank, (i, score)) in scores
+        .into_iter()
+        .take_while(|(_, s)| *s >= threshold)
+        .take(5)
+        .enumerate()
+    {
+        let id = ids[i];
+        if let Some(r) = meta.get(&id) {
+            out.push_str(&format!(
+                "[{rank}] {score:.3} {}:{}-{} ({})\n",
+                r.path, r.start, r.end, r.lang
+            ));
+            let mut prev = r.preview.clone();
+            if prev.len() > 600 {
+                prev.truncate(600);
             }
+            out.push_str(&prev);
+            out.push_str("\n---\n");
         }
-        if out.len() > 2000 {
-            out.truncate(2000);
-        }
-        format!(
-            "Context (top matches from local code index):
-
-```text
-{}
-```
-
-Use the above only if relevant.",
-            out
-        )
-    } else {
-        String::new()
-    };
-
-    let refs_md = refs_list;
-    Some((ctx.clone(), refs_md.clone()));
+    }
+    if out.len() > 2000 {
+        out.truncate(2000);
+    }
+    let ctx = format!(
+        "Context (top matches from local code index):\n\n```text\n{}\n```\n\nUse the above only if relevant.",
+        out
+    );
+    // Compact UI summary: top confidence as percent and number of items found.
+    let cf_pct = (top * 100.0).round();
+    let refs_md = format!("> {:.0}% -- {} items found\n\n", cf_pct, found);
     Some((ctx, refs_md))
 }
 fn load_vectors_mmap(p: &Path) -> Result<(Vec<u64>, Vec<f32>), ()> {
