@@ -155,123 +155,8 @@ fn build(args: &crate::IndexBuildArgs) -> Result<()> {
     let root = std::env::current_dir()?;
     let manifest_path = idx_dir().join(MANIFEST_FILE);
 
-    // Model selection
-    let (model_name, dim) = match args.model.as_str() {
-        "bge-large" => ("bge-large-en-v1.5", 1024usize),
-        _ => ("bge-small-en-v1.5", 384usize),
-    };
-
-    // Scan files and produce chunks
-    let mut files_indexed = 0usize;
-    let mut chunks_indexed = 0usize;
-    let mut vectors = VectorStore::new(dim);
-
-    let meta_tmp = idx_dir().join(format!("{}.tmp", META_FILE));
-    let mut meta_writer = BufWriter::new(File::create(&meta_tmp)?);
-
-    let mut id_counter: u64 = 0;
-    for entry in ignore::WalkBuilder::new(&root)
-        .hidden(false)
-        .ignore(true)
-        .git_ignore(true)
-        .git_exclude(true)
-        .git_global(true)
-        .build()
-    {
-        let entry = match entry { Ok(e) => e, Err(_) => continue };
-        let path = entry.path();
-        if path.is_dir() { continue; }
-        if should_skip(path) { continue; }
-        let lang = language_for(path);
-        let text = match read_text_if_textual(path) { Ok(Some(t)) => t, _ => continue };
-        files_indexed += 1;
-        let chunks = match args.chunk.as_str() {
-            "auto" => chunk_auto(&text, path, args.lines, args.overlap, &lang),
-            _ => chunk_lines(&text, args.lines, args.overlap),
-        };
-        for (start, end, preview) in chunks {
-            let emb = embed_text(model_name, &text[start..end])?;
-            if emb.len() != dim { bail!("embedding dimension mismatch: got {}, want {}", emb.len(), dim); }
-            let id = id_counter; id_counter += 1; chunks_indexed += 1;
-            vectors.push(id, &emb);
-            let sha = sha256_hex(&text[start..end]);
-            let row = MetaRow { id, path: rel(&root, path), start: offset_to_line(&text, start), end: offset_to_line(&text, end), lang: lang.clone(), sha256: sha, preview };
-            serde_json::to_writer(&mut meta_writer, &row)?; meta_writer.write_all(b"\n")?;
-        }
-    }
-    drop(meta_writer);
-
-    // Persist vectors flat
-    let vectors_tmp = idx_dir().join(format!("{}.tmp", VECTORS_FILE));
-    {
-        let mut w = BufWriter::new(File::create(&vectors_tmp)?);
-        // simple binary: [u32 magic][u32 dim][u64 rows] then ids then f32 data
-        w.write_all(&0xC0D3u32.to_le_bytes())?;
-        w.write_all(&(vectors.dim as u32).to_le_bytes())?;
-        w.write_all(&(vectors.rows() as u64).to_le_bytes())?;
-        for id in &vectors.ids { w.write_all(&id.to_le_bytes())?; }
-        let bytes = bytemuck::cast_slice::<f32, u8>(&vectors.data);
-        w.write_all(bytes)?;
-        w.flush()?;
-    }
-
-    // Checksums
-    let chk_vec = sha256_file(&vectors_tmp)?;
-    let chk_meta = sha256_file(&meta_tmp)?;
-
-    // Write manifest tmp
-    let manifest = Manifest {
-        index_version: 1,
-        engine: "fastembed".into(),
-        model: model_name.into(),
-        dim,
-        metric: "cosine".into(),
-        chunk_mode: args.chunk.clone(),
-        chunk: ChunkCfg { lines: args.lines, overlap: args.overlap },
-        repo: RepoInfo { root: ".".into(), git_sha: read_git_head_sha() },
-        counts: Counts { files: files_indexed, chunks: chunks_indexed },
-        checksums: Checksums { vectors_hnsw: chk_vec.clone(), meta_jsonl: chk_meta.clone() },
-        created_at: now_iso(),
-        last_refresh: now_iso(),
-    };
-    let manifest_tmp = idx_dir().join(format!("{}.tmp", MANIFEST_FILE));
-    fs::write(&manifest_tmp, serde_json::to_vec_pretty(&manifest)?)?;
-
-    // Atomic renames
-    fs::rename(vectors_tmp, idx_dir().join(VECTORS_FILE))?;
-    fs::rename(meta_tmp, idx_dir().join(META_FILE))?;
-    fs::rename(manifest_tmp, manifest_path)?;
-
-    eprintln!("Index build complete: {} files, {} chunks", files_indexed, chunks_indexed);
-    Ok(())
-}
-
-fn query(args: &crate::IndexQueryArgs) -> Result<()> {
-    let manifest: Manifest = serde_json::from_slice(&fs::read(idx_dir().join(MANIFEST_FILE))?)?;
-    let (ids, data) = load_vectors(idx_dir().join(VECTORS_FILE))?;
-    let meta = load_meta(idx_dir().join(META_FILE))?;
-    let qv = embed_text(&manifest.model, &args.query)?;
-    if qv.len()!=manifest.dim { bail!("query dim {} != index dim {}", qv.len(), manifest.dim); }
-    let k = args.k.min(ids.len());
-    let mut scores: Vec<(usize, f32)> = (0..ids.len()).map(|i| (i, cosine(&qv, &data[i*manifest.dim..(i+1)*manifest.dim]))).collect();
-    scores.sort_by(|a,b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    let mut hits = 0u64;
-    for (rank,(i,score)) in scores.iter().take(k).enumerate() {
-        if *score >= 0.25 { hits += 1; }
-        let id = ids[*i];
-        if let Some(row) = meta.get(&id) {
-            println!("[{rank}] {score:.3} {}:{}-{} ({})", row.path, row.start, row.end, row.lang);
-            if args.show_snippets { println!("{}\n---", row.preview); }
-        }
-    }
-    // analytics
-    update_analytics(|mut a| { a.queries+=1; let hit = if scores.get(0).map(|(_,s)| *s >= 0.25).unwrap_or(false) {1} else {0}; a.hits+=hit; a.misses = a.queries.saturating_sub(a.hits); a.last_query_ts=Some(now_iso()); a })?;
-    Ok(())
-}
-
-fn status() -> Result<()> {
-    let manifest_path = idx_dir().join(MANIFEST_FILE);
     if !manifest_path.exists() { println!("Index: Missing"); return Ok(()); }
+if !manifest_path.exists() { println!("Index: Missing"); return Ok(()); }
     let m: Manifest = serde_json::from_slice(&fs::read(&manifest_path)?)?;
     let an: Analytics = read_analytics().unwrap_or_default();
     let vec_sz = fs::metadata(idx_dir().join(VECTORS_FILE)).map(|m| m.len()).unwrap_or(0);
@@ -505,8 +390,66 @@ fn update_analytics<F: FnOnce(Analytics) -> Analytics>(f: F) -> Result<()> {
 }
 
 
+
+
+fn query(args: &crate::IndexQueryArgs) -> anyhow::Result<()> {
+    let manifest: Manifest = serde_json::from_slice(&fs::read(idx_dir().join(MANIFEST_FILE))?)?;
+    let (ids, data) = load_vectors(idx_dir().join(VECTORS_FILE))?;
+    let meta = load_meta(idx_dir().join(META_FILE))?;
+    let qv = embed_text(&manifest.model, &args.query)?;
+    if qv.len()!=manifest.dim { bail!("query dim {} != index dim {}", qv.len(), manifest.dim); }
+    let k = args.k.min(ids.len());
+    let mut scores: Vec<(usize, f32)> = (0..ids.len()).map(|i| (i, cosine(&qv, &data[i*manifest.dim..(i+1)*manifest.dim]))).collect();
+    scores.sort_by(|a,b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    for (rank,(i,score)) in scores.iter().take(k).enumerate() {
+        let id = ids[*i];
+        if let Some(row) = meta.get(&id) {
+            println!("[{rank}] {score:.3} {}:{}-{} ({})", row.path, row.start, row.end, row.lang);
+            if args.show_snippets { println!("{}
+---", row.preview); }
+        }
+    }
+    update_analytics(|mut a| { a.queries+=1; let hit = if scores.get(0).map(|(_,s)| *s >= 0.25).unwrap_or(false) {1} else {0}; a.hits+=hit; a.misses = a.queries.saturating_sub(a.hits); a.last_query_ts=Some(now_iso()); a })?;
+    Ok(())
+}
+
+fn status() -> anyhow::Result<()> {
+    let manifest_path = idx_dir().join(MANIFEST_FILE);
+    if !manifest_path.exists() { println!("Index: Missing"); return Ok(()); }
+    let m: Manifest = serde_json::from_slice(&fs::read(&manifest_path)?)?;
+    let an: Analytics = read_analytics().unwrap_or_default();
+    let vec_sz = fs::metadata(idx_dir().join(VECTORS_FILE)).map(|m| m.len()).unwrap_or(0);
+    println!(
+        "Index: Ready
+Last indexed: {}
+Model: {} ({}-D)
+Vectors: {}
+Size: {} bytes
+Analytics: queries={}, hit_ratio={:.2}",
+        relative_age(&m.last_refresh).unwrap_or_else(|| m.last_refresh.clone()), m.model, m.dim, m.counts.chunks, vec_sz, an.queries, if an.queries>0 { an.hits as f32 / an.queries as f32 } else { 0.0 }
+    );
+    Ok(())
+}
+
+
 // ---------- git & locking & time helpers ----------
 fn git_has_changes() -> bool {
+
+fn git_changed_sets() -> (std::collections::HashSet<String>, std::collections::HashSet<String>) {
+    use std::process::Command;
+    let mut changed = std::collections::HashSet::new();
+    let mut deleted = std::collections::HashSet::new();
+    let root = repo_root();
+    let run = |args: &[&str]| -> Option<String> {
+        let out = Command::new("git").args(args).current_dir(&root).output().ok()?;
+        if out.status.success() { Some(String::from_utf8_lossy(&out.stdout).to_string()) } else { None }
+    };
+    if let Some(s) = run(&["ls-files","-m"]) { for l in s.lines() { if !l.trim().is_empty() { changed.insert(l.trim().to_string()); } } }
+    if let Some(s) = run(&["ls-files","-o","--exclude-standard"]) { for l in s.lines() { if !l.trim().is_empty() { changed.insert(l.trim().to_string()); } } }
+    if let Some(s) = run(&["ls-files","-d"]) { for l in s.lines() { if !l.trim().is_empty() { deleted.insert(l.trim().to_string()); } } }
+    (changed, deleted)
+}
+
     let out = std::process::Command::new("git")
         .args(["ls-files","-m","-o","--exclude-standard"])
         .output();
