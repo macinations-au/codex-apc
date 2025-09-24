@@ -76,4 +76,9 @@ pub(crate) enum AppEvent {
     /// current session using the provided report markdown. If already
     /// memorized in this session, it is a no-op.
     MemorizeReportIfNeeded(String),
+    /// Show a short-lived notice in the footer (e.g., background tasks).
+    FooterNotice(String),
+    ClearFooterNotice,
+    /// Start a background rebuild of the codebase report without streaming into chat.
+    StartBackgroundAboutRefresh { prompt: String },
 }

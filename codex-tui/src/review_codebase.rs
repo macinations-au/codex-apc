@@ -118,7 +118,7 @@ pub async fn run_review_codebase(
                 app_tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
             }
 
-            // Decide whether to suggest an update (stale or changes found)
+            // Decide whether to auto-refresh (stale or changes found)
             let age = Utc::now() - prev.generated_at;
             let is_stale = age.num_hours() >= 24;
             let changed = if inside_git {
@@ -127,24 +127,35 @@ pub async fn run_review_codebase(
                 false
             };
             if is_stale || changed {
-                let mut hint = String::new();
-                if is_stale {
-                    hint.push_str(&format!("Report is {}h old. ", age.num_hours()));
+                // Auto-refresh quietly in the background. Show footer notice only.
+                app_tx.send(AppEvent::FooterNotice("Building codebase report…".to_string()));
+                // Compute a fresh prompt (quiet) and ask ChatWidget to run it in background.
+                let candidates = if inside_git {
+                    curate_initial_file_set(&cwd)
+                        .union(&git_delta_changed_paths(Some(&prev), &git).await)
+                        .cloned()
+                        .collect::<BTreeSet<PathBuf>>()
+                } else {
+                    curate_initial_file_set(&cwd)
+                };
+                let candidates = if candidates.is_empty() {
+                    fallback_scan_workspace(&cwd, 200)
+                } else {
+                    candidates
+                };
+                let mut files: Vec<FileEntry> = Vec::new();
+                let mut ticker = interval(Duration::from_millis(100));
+                for path in candidates {
+                    ticker.tick().await;
+                    if let Ok(entry) = read_and_sample(&cwd, &path).await {
+                        files.push(entry);
+                    }
                 }
-                if changed {
-                    hint.push_str("Changes detected since last review. ");
-                }
-                hint.push_str("Run /about-codebase --refresh to regenerate now.");
-                app_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                    history_cell::new_info_event("Update available".to_string(), Some(hint)),
-                )));
+                let prompt = assemble_prompt(&cwd, &git, Some(&prev), &files, 200 * 1024);
+                app_tx.send(AppEvent::StartBackgroundAboutRefresh { prompt });
             }
 
-            // Ask ChatWidget to memorize once per session (no-op if already done).
-            if !prev.report.markdown.trim().is_empty() {
-                let sanitized = sanitize_markdown_headings(&prev.report.markdown);
-                app_tx.send(AppEvent::MemorizeReportIfNeeded(sanitized));
-            }
+            // Do not route via LLM when showing an existing report.
             return Ok(());
         }
         // No previous report; inform the user this initial run may take time (cyan status style).
@@ -192,9 +203,6 @@ pub async fn run_review_codebase(
             append_markdown(&sanitized, &mut rendered, &config);
             let cell = AgentMessageCell::new(rendered, true);
             app_tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
-            // Ask ChatWidget to memorize once per session (no-op if already done).
-            let sanitized = sanitize_markdown_headings(&prev.report.markdown);
-            app_tx.send(AppEvent::MemorizeReportIfNeeded(sanitized));
         }
         return Ok(());
     }
@@ -614,7 +622,10 @@ fn assemble_prompt(
 }
 
 pub fn load_previous_report(cwd: &Path) -> anyhow::Result<JsonReport> {
-    let path = cwd.join(".codex/review-codebase.json");
+    let path = find_report_in_ancestors(cwd).ok_or_else(|| anyhow::anyhow!(
+        "no report found under {} or its ancestors",
+        cwd.display()
+    ))?;
     let data = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
     let report: JsonReport =
         serde_json::from_slice(&data).with_context(|| format!("parse JSON {}", path.display()))?;
@@ -630,6 +641,14 @@ pub async fn save_report_atomic(cwd: &Path, report: &JsonReport) -> anyhow::Resu
     tokio_fs::write(&tmp_path, &data).await?;
     tokio_fs::rename(&tmp_path, &final_path).await?;
     Ok(())
+}
+
+fn find_report_in_ancestors(cwd: &Path) -> Option<PathBuf> {
+    for dir in cwd.ancestors() {
+        let path = dir.join(".codex/review-codebase.json");
+        if path.exists() { return Some(path); }
+    }
+    None
 }
 
 /// Update the saved report's markdown and basic metadata (time/model/token usage),

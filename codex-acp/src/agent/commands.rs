@@ -108,7 +108,7 @@ impl CodexAgent {
                 };
                 let cwd = self.config.cwd.clone();
                 if !refresh {
-                    // Quick view: render saved report if available, then ask the model to memorize it.
+                    // Quick view: render saved report if available; do NOT route via LLM.
                     if let Ok(rep) = crate::review_persist::load_previous_report_sync(&cwd) {
                         if rep.report.markdown.trim().is_empty() {
                             let msg = "No saved report content yet — run /about-codebase --refresh to generate one.";
@@ -120,83 +120,10 @@ impl CodexAgent {
                             let sanitized = crate::review_persist::sanitize_markdown_for_display(
                                 &rep.report.markdown,
                             );
-                            // 1) Display the saved report to the client
+                            // Display the saved report to the client
                             let (tx, rx) = oneshot::channel();
                             self.send_message_chunk(session_id, sanitized.clone().into(), tx)?;
                             let _ = rx.await;
-
-                            // 2) Ask the model to memorize the report for this session (once per session, if backend available)
-                            let mut should_memorize = false;
-                            if let Ok(mut map) = self.sessions.try_borrow_mut()
-                                && let Some(state) = map.get_mut(&sid_str)
-                                && !state.about_memorized
-                            {
-                                state.about_memorized = true;
-                                should_memorize = true;
-                            }
-                            if let Some(conv) = session.conversation.as_ref()
-                                && should_memorize
-                            {
-                                // Submit and synchronously stream the acknowledgement here to avoid
-                                // competing event readers.
-                                let sid_str = session_id.0.to_string();
-                                let submit_id =
-                                    format!("s{}-{}", sid_str, self.next_submit_seq.get());
-                                self.next_submit_seq.set(self.next_submit_seq.get() + 1);
-                                let mem_prompt = format!(
-                                    "Please memorize the following codebase report for this session. Do not analyze or restate it. When you are done, reply exactly with: Agent memorised.\n\n--- BEGIN CODEBASE REPORT ---\n{}\n--- END CODEBASE REPORT ---\n",
-                                    sanitized
-                                );
-                                // Ensure the acknowledgement starts on a new line in the client.
-                                let (tx, rx) = oneshot::channel();
-                                self.send_message_chunk(session_id, "\n\n".into(), tx)?;
-                                let _ = rx.await;
-                                conv.submit_with_id(Submission {
-                                    id: submit_id.clone(),
-                                    op: Op::UserInput {
-                                        items: vec![InputItem::Text { text: mem_prompt }],
-                                    },
-                                })
-                                .await
-                                .map_err(Error::into_internal_error)?;
-
-                                // Stream the acknowledgement back to the client synchronously
-                                loop {
-                                    let event = conv
-                                        .next_event()
-                                        .await
-                                        .map_err(Error::into_internal_error)?;
-                                    if event.id != submit_id {
-                                        continue;
-                                    }
-                                    match event.msg {
-                                        EventMsg::AgentMessageDelta(delta) => {
-                                            let (tx, rx) = oneshot::channel();
-                                            self.send_message_chunk(
-                                                session_id,
-                                                delta.delta.into(),
-                                                tx,
-                                            )?;
-                                            let _ = rx.await;
-                                        }
-                                        EventMsg::AgentMessage(_) => {}
-                                        EventMsg::TaskComplete(_) | EventMsg::ShutdownComplete => {
-                                            break;
-                                        }
-                                        EventMsg::Error(err) => {
-                                            let (tx, rx) = oneshot::channel();
-                                            self.send_message_chunk(
-                                                session_id,
-                                                err.message.into(),
-                                                tx,
-                                            )?;
-                                            let _ = rx.await;
-                                            break;
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
                             return Ok(true);
                         }
                     } else {

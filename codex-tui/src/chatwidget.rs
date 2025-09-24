@@ -195,6 +195,9 @@ pub(crate) struct ChatWidget {
     // Background memorize turn state: when true, we suppress normal streaming
     // and avoid setting the UI into task-running mode.
     background_memorize_active: bool,
+    // Background about-codebase rebuild state: suppress streaming; save output
+    // to the report JSON and show a footer notice when done.
+    background_about_rebuild_active: bool,
 }
 
 struct UserMessage {
@@ -240,6 +243,29 @@ impl ChatWidget {
             items: vec![InputItem::Text { text: mem_prompt }],
         }));
     }
+
+    pub(crate) fn start_background_about_refresh(&mut self, prompt: String) {
+        // Suppress transcript streaming and persist the final message to the report JSON.
+        self.background_memorize_active = false; // ensure only one quiet mode is active
+        self.background_about_rebuild_active = true;
+        self.pending_about_save = true;
+        self.app_event_tx.send(AppEvent::CodexOp(Op::UserInput {
+            items: vec![InputItem::Text { text: prompt }],
+        }));
+    }
+
+    pub(crate) fn set_footer_notice(&mut self, text: String, duration: std::time::Duration) {
+        self.bottom_pane.set_index_status(Some(text));
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(duration).await;
+            tx.send(AppEvent::ClearFooterNotice);
+        });
+    }
+
+    pub(crate) fn clear_footer_notice(&mut self) {
+        self.bottom_pane.set_index_status(None);
+    }
     // --- Small event handlers ---
     fn on_session_configured(&mut self, event: codex_core::protocol::SessionConfiguredEvent) {
         self.bottom_pane
@@ -261,18 +287,8 @@ impl ChatWidget {
         if let Some(user_message) = self.initial_user_message.take() {
             self.submit_user_message(user_message);
         }
-        // Daisy-chain AGENTS.md read with codebase report memorization once per session.
-        // If a saved report exists, submit a memorize turn now so /about-codebase later just displays.
-        if !self.about_memorized_in_session {
-            let cwd = self.config.cwd.clone();
-            if let Ok(rep) = crate::review_codebase::load_previous_report(&cwd)
-                && !rep.report.markdown.trim().is_empty()
-            {
-                let sanitized =
-                    crate::review_codebase::sanitize_markdown_headings(&rep.report.markdown);
-                self.memorize_report_if_needed(sanitized);
-            }
-        }
+        // Optional: memorize saved report once per session if enabled.
+        // No automatic memorize on session start; memorization will be triggered after refresh.
         if !self.suppress_session_configured_redraw {
             self.request_redraw();
         }
@@ -281,7 +297,7 @@ impl ChatWidget {
     }
 
     fn on_agent_message(&mut self, message: String) {
-        if self.background_memorize_active {
+        if self.background_memorize_active || self.background_about_rebuild_active {
             // Suppress transcript rendering for background memorize.
             return;
         }
@@ -292,7 +308,7 @@ impl ChatWidget {
     }
 
     fn on_agent_message_delta(&mut self, delta: String) {
-        if self.background_memorize_active {
+        if self.background_memorize_active || self.background_about_rebuild_active {
             // Suppress streaming for background memorize.
             return;
         }
@@ -394,15 +410,21 @@ impl ChatWidget {
             self.pending_about_save = false;
         }
 
-        // Show a compact acknowledgement for background memorize turns and clear the flag.
+        // Show an acknowledgement for background memorize or background report rebuild.
         if self.background_memorize_active {
             if let Some(ref text) = last_agent_message {
                 let ack = text.trim();
                 if !ack.is_empty() {
-                    self.add_to_history(history_cell::new_review_status_line(ack.to_string()))
+                    self.set_footer_notice(ack.to_string(), std::time::Duration::from_secs(60));
                 }
             }
             self.background_memorize_active = false;
+        }
+
+        if self.background_about_rebuild_active {
+            // We already saved the report via pending_about_save branch; just notify.
+            self.set_footer_notice("Codebase report ready".to_string(), std::time::Duration::from_secs(60));
+            self.background_about_rebuild_active = false;
         }
 
         // Trigger a best-effort post-turn index refresh (git-delta) if due.
@@ -866,6 +888,7 @@ impl ChatWidget {
             pending_about_save: false,
             about_memorized_in_session: false,
             background_memorize_active: false,
+            background_about_rebuild_active: false,
         }
     }
 
@@ -928,6 +951,7 @@ impl ChatWidget {
             pending_about_save: false,
             about_memorized_in_session: false,
             background_memorize_active: false,
+            background_about_rebuild_active: false,
         }
     }
 
