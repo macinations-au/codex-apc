@@ -276,6 +276,8 @@ impl ChatWidget {
         if !self.suppress_session_configured_redraw {
             self.request_redraw();
         }
+        // Update footer with index last-updated status on session start.
+        self.refresh_index_last_updated_footer();
     }
 
     fn on_agent_message(&mut self, message: String) {
@@ -405,6 +407,8 @@ impl ChatWidget {
 
         // Trigger a best-effort post-turn index refresh (git-delta) if due.
         maybe_trigger_post_turn_index_refresh();
+        // Refresh the footer's index last-updated status after each turn.
+        self.refresh_index_last_updated_footer();
     }
 
     pub(crate) fn set_token_info(&mut self, info: Option<TokenUsageInfo>) {
@@ -2096,6 +2100,63 @@ fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
     let cf_pct = (top * 100.0).round();
     let summary_md = format!("> {:.0}% -- {} items found\n\n", cf_pct, found);
     Some((ctx, summary_md))
+}
+
+fn compute_relative_age(iso: &str) -> Option<String> {
+    use chrono::{DateTime, Utc};
+    let dt = DateTime::parse_from_rfc3339(iso).ok()?.with_timezone(&Utc);
+    let now = Utc::now();
+    let secs = (now - dt).num_seconds();
+    Some(if secs < 60 {
+        "now".to_string()
+    } else if secs < 3600 {
+        format!("{} min ago", secs / 60)
+    } else if secs < 86400 {
+        let h = secs / 3600;
+        format!("{} hr{} ago", h, if h == 1 { "" } else { "s" })
+    } else if secs < 86400 * 7 {
+        let d = secs / 86400;
+        format!("{} day{} ago", d, if d == 1 { "" } else { "s" })
+    } else if secs < 86400 * 30 {
+        let w = secs / (86400 * 7);
+        format!("{} week{} ago", w, if w == 1 { "" } else { "s" })
+    } else {
+        let m = secs / (86400 * 30);
+        format!("{} month{} ago", m, if m == 1 { "" } else { "s" })
+    })
+}
+
+impl ChatWidget {
+    fn refresh_index_last_updated_footer(&mut self) {
+        use std::fs;
+        use std::path::PathBuf;
+        let mut p = PathBuf::from(".codex/index/manifest.json");
+        let q = self.config.cwd.clone().join(".codex/index/manifest.json");
+        if q.exists() { p = q; }
+        let text = match fs::read_to_string(&p) {
+            Ok(s) => s,
+            Err(_) => {
+                self.bottom_pane.set_index_last_updated(None);
+                return;
+            }
+        };
+        let last = match serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v.get("last_refresh").and_then(|x| x.as_str()).map(|s| s.to_string()))
+        {
+            Some(s) => s,
+            None => {
+                self.bottom_pane.set_index_last_updated(None);
+                return;
+            }
+        };
+        if let Some(rel) = compute_relative_age(&last) {
+            self.bottom_pane
+                .set_index_last_updated(Some(format!("Indexed {}", rel)));
+        } else {
+            self.bottom_pane.set_index_last_updated(None);
+        }
+    }
 }
 
 // --- Post‑turn index refresh trigger (non‑blocking) ---
