@@ -222,14 +222,14 @@ Phase 4 — Enhancements
 ### Carry‑Over Notes (as of 0.39.0‑apc.7)
 - ACP retrieval is in‑process (FastEmbed OnceLock + mmap + rayon) with thresholded context injection (env `CODEX_INDEX_RETRIEVAL_THRESHOLD`, default 0.95) and an always‑visible references list.
   - Touchpoints:
-    - Retrieval + refs: `codex-acp/src/agent.rs:1020` (function `fetch_retrieval_context`)
-    - Injection call site: `codex-acp/src/agent.rs:596` (before building `items`)
-- TUI shows Index in `/status` and uses shell‑out retrieval; in‑process path not yet ported.
+    - Retrieval + refs: `codex-acp/src/agent.rs` (fetch + format in‑process)
+    - Injection call site: `codex-acp/src/agent.rs` (before building `items`)
+  - TUI now mirrors the ACP references UX: displays a "References (retrieval)" list before the LLM response and inserts a spacer line so the reply starts on the next line. Implementation: `codex-tui/src/chatwidget.rs` (`submit_user_message` + `fetch_retrieval_context_plus`).
 - Incremental indexing (git‑delta) is implemented in `codex-agentic/src/indexing/mod.rs` and currently performs rebuild‑and‑swap of flat vectors/meta. Background refresh is timer‑based (5 min).
 - Version installed: `codex-agentic 0.39.0‑apc.7`.
 - Env toggles:
   - `CODEX_INDEXING=0` disables auto build/refresh
-  - `CODEX_INDEX_RETRIEVAL=0` disables retrieval injection
+  - `CODEX_INDEX_RETRIEVAL=0` disables retrieval injection (ACP + TUI)
   - `CODEX_INDEX_RETRIEVAL_THRESHOLD` adjusts confidence threshold (0.0–1.0)
 
 ### Atomic Task Checklist (continuation)
@@ -243,8 +243,8 @@ Phase 1 — Core + CLI
 Phase 2 — ACP/TUI
 - [x] ACP: in‑process retrieval (FastEmbed + mmap + rayon)
 - [x] ACP: always show references summary; thresholded context injection
-- [ ] TUI: in‑process retrieval (FastEmbed + mmap + rayon)
-- [ ] TUI: show references summary before LLM; add spacer line
+  - [ ] TUI: in‑process retrieval (FastEmbed + mmap + rayon)
+  - [x] TUI: show references summary before LLM; add spacer line
 - [ ] Add CLI `index query --json` output for richer UI rendering
 
 Phase 3 — Refresh & Scheduling
@@ -269,4 +269,3 @@ Phase 4 — Enhancements
   - Shared helpers can live in a small internal module or duplicated minimal code (avoid new crate).
 - ACP references style:
   - The summary is plain markdown; if the client supports HTML, we can switch back to `<details><summary>` later.
-
