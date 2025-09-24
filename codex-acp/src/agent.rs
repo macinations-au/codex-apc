@@ -34,6 +34,35 @@ use tokio::task;
 use tracing::{info, warn};
 
 mod commands;
+fn trigger_post_turn_index_refresh() {
+    // Respect global disable
+    if std::env::var("CODEX_INDEXING")
+        .map(|v| v == "0" || v.eq_ignore_ascii_case("off"))
+        .unwrap_or(false)
+    {
+        return;
+    }
+    use std::sync::{Mutex, OnceLock};
+    static LAST_RUN: OnceLock<Mutex<std::time::Instant>> = OnceLock::new();
+    let min_secs: u64 = std::env::var("CODEX_INDEX_REFRESH_MIN_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(300);
+    let now = std::time::Instant::now();
+    let gate = LAST_RUN.get_or_init(|| Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(min_secs + 1)));
+    if let Ok(mut last) = gate.lock() {
+        if now.duration_since(*last).as_secs() < min_secs {
+            return;
+        }
+        *last = now;
+    }
+    std::thread::spawn(|| {
+        let _ = std::process::Command::new("codex-agentic")
+            .arg("index")
+            .arg("build")
+            .status();
+    });
+}
 // Placeholder for per-session state. Holds the Codex conversation
 // handle, its id (for status/reporting), and bookkeeping for streaming.
 #[derive(Clone)]
@@ -987,6 +1016,8 @@ impl Agent for CodexAgent {
                     }
                 }
                 EventMsg::TaskComplete(_) => {
+                    // Trigger a best‑effort post‑turn index refresh (git‑delta) if due.
+                    trigger_post_turn_index_refresh();
                     break;
                 }
                 EventMsg::Error(err) => {

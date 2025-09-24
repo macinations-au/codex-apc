@@ -402,6 +402,9 @@ impl ChatWidget {
             }
             self.background_memorize_active = false;
         }
+
+        // Trigger a best-effort post-turn index refresh (git-delta) if due.
+        maybe_trigger_post_turn_index_refresh();
     }
 
     pub(crate) fn set_token_info(&mut self, info: Option<TokenUsageInfo>) {
@@ -2098,4 +2101,35 @@ fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
     let cf_pct = (top * 100.0).round();
     let summary_md = format!("> {:.0}% -- {} items found\n\n", cf_pct, found);
     Some((ctx, summary_md))
+}
+
+// --- Post‑turn index refresh trigger (non‑blocking) ---
+fn maybe_trigger_post_turn_index_refresh() {
+    use std::sync::{Mutex, OnceLock};
+    static LAST_RUN: OnceLock<Mutex<std::time::Instant>> = OnceLock::new();
+    let min_secs: u64 = std::env::var("CODEX_INDEX_REFRESH_MIN_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(300); // 5 minutes default
+    if std::env::var("CODEX_INDEXING")
+        .map(|v| v == "0" || v.eq_ignore_ascii_case("off"))
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let now = std::time::Instant::now();
+    let gate = LAST_RUN.get_or_init(|| Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(min_secs + 1)));
+    if let Ok(mut last) = gate.lock() {
+        if now.duration_since(*last).as_secs() < min_secs {
+            return;
+        }
+        *last = now;
+    }
+    // Spawn a detached thread to run the refresh without blocking the UI.
+    std::thread::spawn(|| {
+        let _ = StdCommand::new("codex-agentic")
+            .arg("index")
+            .arg("build")
+            .status();
+    });
 }
