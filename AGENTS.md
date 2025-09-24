@@ -137,3 +137,23 @@ ls -lh ~/.cargo/bin/codex-agentic codex-agentic/target/release/codex-agentic
 - Why: keeps the model aligned with the repo context without stalling the UI or starving other turns.
 - Markdown fixes: headings are sanitized to start on a new line; streaming also inserts a blank line before `#` if needed.
 - Avoid background readers in ACP: only one consumer should call `conversation.next_event()` at a time. Do not add background tasks that read conversation events.
+
+
+## Local Install/Sync (for quick testing)
+
+To install the freshest local build into `~/.cargo/bin` and keep it in lockstep while developing:
+
+```bash
+# Build a release binary and sync to ~/.cargo/bin/codex-agentic
+(cd codex-agentic && cargo build --release)
+scripts/codex-agentic.sh --help >/dev/null 2>&1 || true  # syncs installed binary
+
+# Sanity checks
+which codex-agentic
+codex-agentic --version
+codex-agentic index status
+```
+
+Notes
+- The launcher script `scripts/codex-agentic.sh` always prefers the newest local binary (release/debug) and syncs it to `~/.cargo/bin/codex-agentic` for editor integrations.
+- Add `[skip ci]` to local commit messages when iterating to avoid triggering CI or Release workflows on pushes.
