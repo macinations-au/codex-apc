@@ -194,19 +194,20 @@ Phase 1 — Core + CLI
 - [x] Implement `AnalyticsStore` (atomic counters)
 - [x] Implement CLI: `index build/query/status/verify/clean`
 - [x] Wire default-on first run with opt-out env/flag
+- [x] Add incremental git-delta rebuild (changed/untracked/deleted)
 
 Phase 2 — ACP/TUI
 - [x] Add `/index` and `/search` slash commands
-- [x] Add retrieval hook before model call with token budget guard (ACP)
+- [x] Add retrieval hook before model call (ACP + TUI; simple char cap)
 - [x] Extend `/status` panel to show index + analytics
 
 Phase 3 — Background Refresh (timer-based MVP in place; git-delta full rebuild)
 - [ ] Implement post-turn check + git-delta scan (timer-based delta implemented)
 - [ ] Cap work per pass and add backoff
-- [ ] Update manifest `last_refresh` after deltas
+- [x] Update manifest `last_refresh` after deltas
 
 Phase 4 — Enhancements
-- [ ] Add `--model bge-large` (1024‑D) path
+- [x] Add `--model bge-large` (1024‑D) path
 - [ ] Add second grammar (TypeScript or Python)
 - [ ] Add query-context option (include last 1–2 turns)
 
