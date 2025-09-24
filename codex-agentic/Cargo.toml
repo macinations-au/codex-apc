@@ -1,6 +1,6 @@
 [package]
 name = "codex-agentic"
-version = "0.39.0-apc.6"
+version = "0.39.0-apc.7"
 edition = "2024"
 description = "Combined launcher: upstream Codex CLI by default, ACP mode with --acp"
 repository = "https://github.com/macinations-au/codex-apc"
