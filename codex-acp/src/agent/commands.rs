@@ -441,13 +441,24 @@ Notes for Agents
             "index" => {
                 let args = _rest.trim();
                 let mut cli: Vec<String> = vec!["index".into()];
-                if args.is_empty() { cli.push("status".into()); }
-                else { cli.extend(args.split_whitespace().map(|s| s.to_string())); }
+                if args.is_empty() {
+                    cli.push("status".into());
+                } else {
+                    cli.extend(args.split_whitespace().map(|s| s.to_string()));
+                }
                 let out = run_codex_agentic(cli).await;
                 let (tx, rx) = oneshot::channel();
-                self.send_message_chunk(session_id, format!("```text
+                self.send_message_chunk(
+                    session_id,
+                    format!(
+                        "```text
 {}
-```", out).into(), tx)?;
+```",
+                        out
+                    )
+                    .into(),
+                    tx,
+                )?;
                 let _ = rx.await;
                 return Ok(true);
             }
@@ -455,17 +466,33 @@ Notes for Agents
                 let rest = _rest.trim();
                 if rest.is_empty() {
                     let (tx, rx) = oneshot::channel();
-                    self.send_message_chunk(session_id, "Usage: /search <query> [-k N]".into(), tx)?;
-                    let _ = rx.await; return Ok(true);
+                    self.send_message_chunk(
+                        session_id,
+                        "Usage: /search <query> [-k N]".into(),
+                        tx,
+                    )?;
+                    let _ = rx.await;
+                    return Ok(true);
                 }
                 let mut cli: Vec<String> = vec!["index".into(), "query".into(), rest.into()];
-                if !rest.contains("-k ") { cli.push("-k".into()); cli.push("8".into()); }
+                if !rest.contains("-k ") {
+                    cli.push("-k".into());
+                    cli.push("8".into());
+                }
                 cli.push("--show-snippets".into());
                 let out = run_codex_agentic(cli).await;
                 let (tx, rx) = oneshot::channel();
-                self.send_message_chunk(session_id, format!("```text
+                self.send_message_chunk(
+                    session_id,
+                    format!(
+                        "```text
 {}
-```", out).into(), tx)?;
+```",
+                        out
+                    )
+                    .into(),
+                    tx,
+                )?;
                 let _ = rx.await;
                 return Ok(true);
             }
@@ -892,21 +919,32 @@ Notes for Agents
     }
 }
 
-
 async fn run_codex_agentic(args: Vec<String>) -> String {
     use tokio::process::Command;
     let mut cmd = Command::new("codex-agentic");
-    for a in args { cmd.arg(a); }
+    for a in args {
+        cmd.arg(a);
+    }
     match cmd.output().await {
         Ok(o) => {
             let mut s = String::new();
-            if !o.stdout.is_empty() { s.push_str(&String::from_utf8_lossy(&o.stdout)); }
+            if !o.stdout.is_empty() {
+                s.push_str(&String::from_utf8_lossy(&o.stdout));
+            }
             if !o.stderr.is_empty() {
-                if !s.is_empty() { s.push_str("
-"); }
+                if !s.is_empty() {
+                    s.push_str(
+                        "
+",
+                    );
+                }
                 s.push_str(&String::from_utf8_lossy(&o.stderr));
             }
-            if s.trim().is_empty() { "(no output)".into() } else { s }
+            if s.trim().is_empty() {
+                "(no output)".into()
+            } else {
+                s
+            }
         }
         Err(e) => format!("Failed to run codex-agentic: {}", e),
     }

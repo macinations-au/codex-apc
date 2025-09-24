@@ -1261,6 +1261,9 @@ impl ChatWidget {
                 tracing::error!("failed to send message: {e}");
             });
 
+        // Refresh footer index age immediately on new input to keep it visible.
+        self.refresh_index_last_updated_footer();
+
         // Persist the text to cross-session message history.
         if !text.is_empty() {
             self.codex_op_tx

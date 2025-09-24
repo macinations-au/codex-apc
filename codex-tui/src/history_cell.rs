@@ -1349,7 +1349,9 @@ pub(crate) fn new_status_output(
             } else {
                 for l in s.lines() {
                     let mut text = l.to_string();
-                    if text.len() > 200 { text.truncate(200); }
+                    if text.len() > 200 {
+                        text.truncate(200);
+                    }
                     lines.push(Line::from(vec!["  • ".into(), text.into()]));
                 }
             }
@@ -1358,7 +1360,6 @@ pub(crate) fn new_status_output(
             lines.push("  • (index unavailable)".dim().into());
         }
     }
-
 
     PlainHistoryCell { lines }
 }
