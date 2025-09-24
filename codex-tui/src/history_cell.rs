@@ -1335,6 +1335,31 @@ pub(crate) fn new_status_output(
         format_with_separators(usage.blended_total()).into(),
     ]));
 
+    // 🗂 Index (best-effort)
+    lines.push("".into());
+    lines.push(vec![padded_emoji("🗂").into(), "Index".bold()].into());
+    match std::process::Command::new("codex-agentic")
+        .args(["index", "status"]) // human-readable
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            let mut s = String::from_utf8_lossy(&out.stdout).to_string();
+            if s.trim().is_empty() {
+                lines.push("  • (no index info)".dim().into());
+            } else {
+                for l in s.lines() {
+                    let mut text = l.to_string();
+                    if text.len() > 200 { text.truncate(200); }
+                    lines.push(Line::from(vec!["  • ".into(), text.into()]));
+                }
+            }
+        }
+        _ => {
+            lines.push("  • (index unavailable)".dim().into());
+        }
+    }
+
+
     PlainHistoryCell { lines }
 }
 
