@@ -1013,6 +1013,56 @@ impl ChatWidget {
                                 .await;
                             });
                             return; // Do not submit as a normal user message
+                        } else if let Some(rest) = trimmed.strip_prefix("/index") {
+                            let args_text = rest.trim();
+                            let mut args: Vec<String> = vec!["index".into()];
+                            if args_text.is_empty() {
+                                args.push("status".into());
+                            } else {
+                                if let Some(tokens) = shlex::split(args_text) {
+                                    args.extend(tokens);
+                                }
+                            }
+                            let cfg = self.config.clone();
+                            let tx = self.app_event_tx.clone();
+                            tokio::spawn(async move {
+                                let out = crate::review_codebase::run_local_cli_capture(&cfg.cwd, args);
+                                let msg = format!("```text\n{}\n```", out);
+                                let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                                crate::markdown::append_markdown(&msg, &mut lines, &cfg);
+                                let cell = history_cell::AgentMessageCell::new(lines, true);
+                                tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
+                            });
+                            return;
+                        } else if let Some(rest) = trimmed.strip_prefix("/search") {
+                            let query = rest.trim();
+                            if query.is_empty() {
+                                self.add_to_history(history_cell::new_error_event(
+                                    "Usage: /search <query> [-k N]".to_string(),
+                                ));
+                                return;
+                            }
+                            let args = {
+                                // Note: do not shlex the query — pass as a single argument
+                                let mut v = vec!["index".to_string(), "query".to_string(), query.to_string()];
+                                if !query.contains("-k ") {
+                                    v.push("-k".into());
+                                    v.push("8".into());
+                                }
+                                v.push("--show-snippets".into());
+                                v
+                            };
+                            let cfg = self.config.clone();
+                            let tx = self.app_event_tx.clone();
+                            tokio::spawn(async move {
+                                let out = crate::review_codebase::run_local_cli_capture(&cfg.cwd, args);
+                                let msg = format!("```text\n{}\n```", out);
+                                let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                                crate::markdown::append_markdown(&msg, &mut lines, &cfg);
+                                let cell = history_cell::AgentMessageCell::new(lines, true);
+                                tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
+                            });
+                            return;
                         }
                         // If a task is running, queue the user input to be sent after the turn completes.
                         let user_message = UserMessage {
@@ -1134,6 +1184,24 @@ impl ChatWidget {
             }
             SlashCommand::Status => {
                 self.add_status_output();
+            }
+            SlashCommand::Index => {
+                let cfg = self.config.clone();
+                let tx = self.app_event_tx.clone();
+                tokio::spawn(async move {
+                    let out = crate::review_codebase::run_local_cli_capture(&cfg.cwd, vec!["index".into(), "status".into()]);
+                    let msg = format!("```text\n{}\n```", out);
+                    let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                    crate::markdown::append_markdown(&msg, &mut lines, &cfg);
+                    let cell = history_cell::AgentMessageCell::new(lines, true);
+                    tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
+                });
+            }
+            SlashCommand::Search => {
+                self.add_to_history(history_cell::new_info_event(
+                    "Usage: /search <query> [-k N]".to_string(),
+                    None,
+                ));
             }
             SlashCommand::Limits => {
                 self.add_limits_output();

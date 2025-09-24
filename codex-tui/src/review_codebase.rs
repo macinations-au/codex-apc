@@ -256,6 +256,27 @@ pub async fn run_review_codebase(
     Ok(())
 }
 
+/// Helper used by TUI to run `codex-agentic` CLI commands and capture stdout.
+/// Runs synchronously; used inside `tokio::spawn` blocks.
+pub(crate) fn run_local_cli_capture(cwd: &Path, args: Vec<String>) -> String {
+    use std::process::Command as StdCommand;
+    let mut cmd = StdCommand::new("codex-agentic");
+    cmd.current_dir(cwd);
+    for a in args { cmd.arg(a); }
+    match cmd.output() {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
+        Ok(out) => {
+            let mut s = String::from_utf8_lossy(&out.stdout).to_string();
+            if !out.stderr.is_empty() {
+                s.push_str("\n--- stderr ---\n");
+                s.push_str(&String::from_utf8_lossy(&out.stderr));
+            }
+            s
+        }
+        Err(e) => format!("failed to run codex-agentic: {e}"),
+    }
+}
+
 fn compute_inputs_hash(commit: Option<&str>, files: &[FileEntry]) -> String {
     let mut hasher = Sha256::new();
     if let Some(c) = commit {
