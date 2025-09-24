@@ -325,14 +325,18 @@ fn language_for(path: &Path) -> String {
 }
 
 fn should_skip(path: &Path) -> bool {
-    if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
-        if name.starts_with('.') {
-            return true;
-        }
+    // Skip any dotfile or dot-directory anywhere in the path
+    if path
+        .components()
+        .any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
+    {
+        return true;
     }
+    // Common heavy or generated directories
     let comps: Vec<_> = path.components().collect();
     let deny = [
         ".git",
+        ".codex", // our own index/cache
         "target",
         "node_modules",
         "dist",
