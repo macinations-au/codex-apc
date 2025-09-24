@@ -28,6 +28,7 @@ use codex_core::{
 use codex_protocol::mcp_protocol::ConversationId;
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot, oneshot::Sender};
+use tokio::process::Command as TokioCommand;
 use tokio::task;
 use tracing::{info, warn};
 
@@ -592,6 +593,13 @@ impl Agent for CodexAgent {
 
         // Build user input submission items from prompt content blocks.
         let mut items: Vec<InputItem> = Vec::new();
+        // Retrieval injection (local index) unless disabled
+        if std::env::var("CODEX_INDEX_RETRIEVAL").map(|v| v=="0" || v.eq_ignore_ascii_case("off")).unwrap_or(false) == false {
+            if let Some(ctx) = fetch_retrieval_context(&args.prompt).await {
+                items.push(InputItem::Text { text: ctx });
+            }
+        }
+
         for block in &args.prompt {
             match block {
                 ContentBlock::Text(t) => {
@@ -1005,4 +1013,25 @@ impl Agent for CodexAgent {
         info!(method = %args.method, params = ?args.params, "Received extension notification call");
         Ok(())
     }
+}
+
+async fn fetch_retrieval_context(blocks: &Vec<ContentBlock>) -> Option<String> {
+    let mut q = String::new();
+    for b in blocks {
+        if let ContentBlock::Text(t) = b {
+            if !q.is_empty() { q.push_str("\n"); }
+            q.push_str(&t.text);
+        }
+    }
+    if q.trim().is_empty() { return None; }
+    let q: String = q.chars().take(500).collect();
+    let out = TokioCommand::new("codex-agentic")
+        .arg("index").arg("query").arg(&q).arg("-k").arg("8").arg("--show-snippets")
+        .output().await.ok()?;
+    if !out.status.success() { return None; }
+    let mut s = String::from_utf8_lossy(&out.stdout).to_string();
+    if s.trim().is_empty() { return None; }
+    if s.len() > 2000 { s.truncate(2000); }
+    let ctx = format!("Context (top matches from local code index):\n\n```text\n{}\n```\n\nUse the above only if relevant.", s);
+    Some(ctx)
 }

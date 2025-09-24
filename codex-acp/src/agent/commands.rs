@@ -808,6 +808,9 @@ Notes for Agents
             && matches!(sandbox_mode, SandboxPolicy::DangerFullAccess);
         let web_search = self.config.tools_web_search_request;
 
+        // Index status (best-effort)
+        let index_status = run_codex_agentic(vec!["index".into(), "status".into()]).await;
+
         // Markdown output with headings and lists
         format!(
             concat!(
@@ -831,7 +834,9 @@ Notes for Agents
                 "- Session ID: `{sid}`\n",
                 "- Input: `{input}`\n",
                 "- Output: `{output}`\n",
-                "- Total: `{total}`\n"
+                "- Total: `{total}`\n\n",
+                "## Index\n",
+                "```text\n{index_status}\n```\n"
             ),
             cwd = cwd,
             approval = approval_mode,
@@ -850,6 +855,7 @@ Notes for Agents
             input = input,
             output = output,
             total = total,
+            index_status = index_status.trim(),
         )
     }
 

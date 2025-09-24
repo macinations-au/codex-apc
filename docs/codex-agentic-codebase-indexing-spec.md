@@ -196,8 +196,8 @@ Phase 1 — Core + CLI
 - [x] Wire default-on first run with opt-out env/flag
 
 Phase 2 — ACP/TUI
-- [ ] Add `/index` and `/search` slash commands
-- [ ] Add retrieval hook before model call with token budget guard
+- [x] Add `/index` and `/search` slash commands
+- [x] Add retrieval hook before model call with token budget guard (ACP)
 - [ ] Extend `/status` panel to show index + analytics
 
 Phase 3 — Background Refresh (timer-based MVP in place; git-delta full rebuild)
