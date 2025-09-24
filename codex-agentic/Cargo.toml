@@ -6,6 +6,7 @@ description = "Combined launcher: upstream Codex CLI by default, ACP mode with -
 repository = "https://github.com/macinations-au/codex-apc"
 
 [dependencies]
+regex = "1"
 anyhow = "1"
 codex-acp = { path = "../codex-acp" }
 toml = "0.9"

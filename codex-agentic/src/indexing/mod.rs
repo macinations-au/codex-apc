@@ -6,8 +6,10 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use time::OffsetDateTime;
+use regex::Regex;
 
 const INDEX_DIR: &str = ".codex/index";
+const IGNORE_FILE: &str = ".index-ignore";
 const VECTORS_FILE: &str = "vectors.hnsw"; // flat store for now
 const META_FILE: &str = "meta.jsonl";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -106,6 +108,7 @@ pub fn dispatch(cmd: crate::IndexCmd) -> Result<()> {
         crate::IndexCmd::Status => status(),
         crate::IndexCmd::Verify => verify(),
         crate::IndexCmd::Clean => clean(),
+        crate::IndexCmd::Ignore(args) => ignore_cmd(&args),
     }
 }
 
@@ -182,6 +185,66 @@ fn idx_dir() -> PathBuf {
     repo_root().join(INDEX_DIR)
 }
 
+fn ignore_file() -> PathBuf {
+    repo_root().join(IGNORE_FILE)
+}
+
+const DEFAULT_IGNORE: &str = r"# Patterns ignored by the local code index (glob-like)
+# Hidden files/dirs
+.*
+# VCS / tooling / caches
+.git
+.codex
+.idea
+.vscode
+node_modules
+target
+dist
+build
+";
+
+fn load_ignore_patterns() -> Vec<String> {
+    let p = ignore_file();
+    if !p.exists() {
+        let _ = std::fs::write(&p, DEFAULT_IGNORE);
+    }
+    std::fs::read_to_string(&p)
+        .map(|s| {
+            s.lines()
+                .map(|l| l.trim())
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(|l| l.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn save_ignore_patterns(mut pats: Vec<String>) -> anyhow::Result<()> {
+    pats.sort();
+    pats.dedup();
+    let body = pats.join("
+");
+    std::fs::write(ignore_file(), format!("{}
+", body)).context("write .index-ignore")
+}
+
+fn glob_to_regex(glob: &str) -> Regex {
+    let mut r = String::from("^");
+    for ch in glob.chars() {
+        match ch {
+            '*' => r.push_str(".*"),
+            '?' => r.push('.'),
+            '.' | '+' | '(' | ')' | '|' | '{' | '}' | '[' | ']' | '^' | '$' | '\\' => {
+                r.push('\\');
+                r.push(ch);
+            }
+            _ => r.push(ch),
+        }
+    }
+    r.push('$');
+    Regex::new(&r).unwrap_or_else(|_| Regex::new(r"^$\b").unwrap())
+}
+
 fn ensure_dir() -> Result<()> {
     fs::create_dir_all(idx_dir()).context("create index dir")
 }
@@ -240,6 +303,33 @@ fn clean() -> Result<()> {
     println!("Index removed");
     Ok(())
 }
+
+
+fn ignore_cmd(args: &crate::IndexIgnoreArgs) -> anyhow::Result<()> {
+    if args.reset {
+        std::fs::write(ignore_file(), DEFAULT_IGNORE).context("write default .index-ignore")?;
+    }
+    let mut pats = load_ignore_patterns();
+    if !args.add.is_empty() {
+        pats.extend(args.add.clone());
+    }
+    if !args.remove.is_empty() {
+        let remove: std::collections::HashSet<String> = args.remove.iter().cloned().collect();
+        pats.retain(|p| !remove.contains(p));
+    }
+    if args.reset || !args.add.is_empty() || !args.remove.is_empty() {
+        save_ignore_patterns(pats)?;
+    }
+    if args.list || (!args.reset && args.add.is_empty() && args.remove.is_empty()) {
+        print!("Ignore file: {}
+", ignore_file().display());
+        for p in load_ignore_patterns() {
+            println!("{p}");
+        }
+    }
+    Ok(())
+}
+
 
 // ---------- helpers ----------
 
@@ -325,30 +415,15 @@ fn language_for(path: &Path) -> String {
 }
 
 fn should_skip(path: &Path) -> bool {
-    // Skip any dotfile or dot-directory anywhere in the path
-    if path
-        .components()
-        .any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
-    {
-        return true;
-    }
-    // Common heavy or generated directories
-    let comps: Vec<_> = path.components().collect();
-    let deny = [
-        ".git",
-        ".codex", // our own index/cache
-        "target",
-        "node_modules",
-        "dist",
-        "build",
-        ".idea",
-        ".vscode",
-    ];
-    if comps
-        .iter()
-        .any(|c| deny.iter().any(|d| c.as_os_str().to_string_lossy() == *d))
-    {
-        return true;
+    let relp = rel(&repo_root(), path);
+    let patterns = load_ignore_patterns();
+    if !patterns.is_empty() {
+        for p in &patterns {
+            let re = glob_to_regex(p);
+            if re.is_match(&relp) {
+                return true;
+            }
+        }
     }
     if let Ok(md) = fs::metadata(path) {
         if md.len() > 5 * 1024 * 1024 {
