@@ -11,6 +11,7 @@ const VECTORS_FILE: &str = "vectors.hnsw"; // flat store for now
 const META_FILE: &str = "meta.jsonl";
 const MANIFEST_FILE: &str = "manifest.json";
 const ANALYTICS_FILE: &str = "analytics.json";
+const LOCK_FILE: &str = "lock";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Manifest {
@@ -94,6 +95,36 @@ pub fn dispatch(cmd: crate::IndexCmd) -> Result<()> {
     }
 }
 
+// Public background helpers -------------------------------------------------
+static STARTED_MAINTENANCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+/// Spawn a best-effort first-run build in a background thread.
+pub fn spawn_first_run_if_enabled() {
+    if std::env::var("CODEX_INDEXING").map(|v| v=="0" || v.eq_ignore_ascii_case("off")).unwrap_or(false) {
+        return;
+    }
+    let manifest_exists = idx_dir().join(MANIFEST_FILE).exists();
+    if manifest_exists { return; }
+    std::thread::spawn(|| {
+        let _ = build(&crate::IndexBuildArgs{ model: "bge-small".into(), force: false, chunk: "auto".into(), lines: 160, overlap: 32 });
+    });
+}
+
+/// Spawn periodic maintenance (simple timer-based) that triggers a rebuild
+/// when git reports modified/untracked files. No-op if already started.
+pub fn spawn_periodic_maintenance() {
+    if STARTED_MAINTENANCE.set(()).is_err() { return; }
+    std::thread::spawn(|| {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(300)); // 5 minutes
+            let changed = git_has_changes();
+            if changed {
+                let _ = build(&crate::IndexBuildArgs{ model: "bge-small".into(), force: false, chunk: "auto".into(), lines: 160, overlap: 32 });
+            }
+        }
+    });
+}
+
 fn repo_root() -> PathBuf {
     if let Ok(out) = std::process::Command::new("git").args(["rev-parse","--show-toplevel"]).output() {
         if out.status.success() {
@@ -120,6 +151,7 @@ fn read_git_head_sha() -> Option<String> {
 
 fn build(args: &crate::IndexBuildArgs) -> Result<()> {
     ensure_dir()?;
+    let _guard = match BuildLock::acquire() { Ok(g) => Some(g), Err(_) => None };
     let root = std::env::current_dir()?;
     let manifest_path = idx_dir().join(MANIFEST_FILE);
 
@@ -245,7 +277,7 @@ fn status() -> Result<()> {
     let vec_sz = fs::metadata(idx_dir().join(VECTORS_FILE)).map(|m| m.len()).unwrap_or(0);
     println!(
         "Index: Ready\nLast indexed: {}\nModel: {} ({}-D)\nVectors: {}\nSize: {} bytes\nAnalytics: queries={}, hit_ratio={:.2}",
-        m.last_refresh, m.model, m.dim, m.counts.chunks, vec_sz, an.queries, if an.queries>0 { an.hits as f32 / an.queries as f32 } else { 0.0 }
+        relative_age(&m.last_refresh).unwrap_or_else(|| m.last_refresh.clone()), m.model, m.dim, m.counts.chunks, vec_sz, an.queries, if an.queries>0 { an.hits as f32 / an.queries as f32 } else { 0.0 }
     );
     Ok(())
 }
@@ -470,4 +502,37 @@ fn update_analytics<F: FnOnce(Analytics) -> Analytics>(f: F) -> Result<()> {
     fs::write(&tmp, serde_json::to_vec_pretty(&a1)?)?;
     fs::rename(tmp, idx_dir().join(ANALYTICS_FILE))?;
     Ok(())
+}
+
+
+// ---------- git & locking & time helpers ----------
+fn git_has_changes() -> bool {
+    let out = std::process::Command::new("git")
+        .args(["ls-files","-m","-o","--exclude-standard"])
+        .output();
+    if let Ok(o) = out { !o.stdout.is_empty() } else { false }
+}
+
+struct BuildLock(std::path::PathBuf);
+impl BuildLock {
+    fn acquire() -> Result<Self> {
+        let p = idx_dir().join(LOCK_FILE);
+        match std::fs::File::options().create_new(true).write(true).open(&p) {
+            Ok(_) => Ok(Self(p)),
+            Err(e) => Err(anyhow::anyhow!(e)),
+        }
+    }
+}
+impl Drop for BuildLock { fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); } }
+
+fn relative_age(iso: &str) -> Option<String> {
+    let t = time::OffsetDateTime::parse(iso, &time::format_description::well_known::Rfc3339).ok()?;
+    let now = time::OffsetDateTime::now_utc();
+    let diff = now - t;
+    let secs = diff.whole_seconds();
+    Some(if secs < 60 { "now".into() }
+         else if secs < 3600 { format!("{}m ago", secs/60) }
+         else if secs < 86400 { format!("{}h ago", secs/3600) }
+         else if secs < 86400*7 { format!("{}d ago", secs/86400) }
+         else { format!("{}w ago", secs/(86400*7)) })
 }

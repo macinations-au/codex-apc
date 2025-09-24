@@ -193,14 +193,14 @@ Phase 1 — Core + CLI
 - [x] Implement `Verifier` (checksums + structure)
 - [x] Implement `AnalyticsStore` (atomic counters)
 - [x] Implement CLI: `index build/query/status/verify/clean`
-- [ ] Wire default-on first run with opt-out env/flag
+- [x] Wire default-on first run with opt-out env/flag
 
 Phase 2 — ACP/TUI
 - [ ] Add `/index` and `/search` slash commands
 - [ ] Add retrieval hook before model call with token budget guard
 - [ ] Extend `/status` panel to show index + analytics
 
-Phase 3 — Background Refresh
+Phase 3 — Background Refresh (timer-based MVP in place; git-delta full rebuild)
 - [ ] Implement post-turn check + git-delta scan
 - [ ] Cap work per pass and add backoff
 - [ ] Update manifest `last_refresh` after deltas

@@ -165,6 +165,9 @@ fn main() -> Result<()> {
             } => {
                 let mut overrides: Vec<(String, TomlValue)> = Vec::new();
                 let mut typed_overrides: CoreConfigOverrides = CoreConfigOverrides::default();
+                // Background indexers (non-blocking)
+                indexing::spawn_first_run_if_enabled();
+                indexing::spawn_periodic_maintenance();
                 if *yolo_with_search {
                     // Add dangerous defaults first so specific -c keys can override them.
                     overrides.push(("ask_for_approval".into(), TomlValue::String("never".into())));
@@ -387,6 +390,10 @@ fn run_embedded_cli(args: &[OsString]) -> Result<()> {
             std::iter::once(OsString::from("codex-agentic")).chain(args.iter().cloned()),
         )
     };
+
+    // Background indexers (non-blocking)
+    indexing::spawn_first_run_if_enabled();
+    indexing::spawn_periodic_maintenance();
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
