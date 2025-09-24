@@ -200,7 +200,7 @@ pub async fn run_review_codebase(
     }
 
     // Determine file set to include (curated + deltas)
-    let candidates = if inside_git {
+    let mut candidates = if inside_git {
         curate_initial_file_set(&cwd)
             .union(&git_delta_changed_paths(prev.as_ref(), &git).await)
             .cloned()
@@ -208,6 +208,15 @@ pub async fn run_review_codebase(
     } else {
         curate_initial_file_set(&cwd)
     };
+
+    // Fallback: if the curated set is empty (e.g., non-standard layout or subdir),
+    // do a lightweight walk of the workspace root to pick a small representative set.
+    if candidates.is_empty() {
+        let scanned = fallback_scan_workspace(&cwd, 200);
+        if !scanned.is_empty() {
+            candidates = scanned;
+        }
+    }
 
     app_tx.send(AppEvent::InsertHistoryCell(Box::new(
         history_cell::new_review_status_line(format!(
@@ -307,6 +316,42 @@ fn curate_initial_file_set(cwd: &Path) -> BTreeSet<PathBuf> {
         set.insert(PathBuf::from(".github/workflows").join(dirent.file_name()));
     }
     set
+}
+
+// Minimal workspace scan when curated set is empty. Avoids heavy deps; quick filters.
+fn fallback_scan_workspace(cwd: &Path, limit: usize) -> BTreeSet<PathBuf> {
+    let mut out = BTreeSet::new();
+    let mut stack = vec![cwd.to_path_buf()];
+    let deny_dirs = [
+        ".git", "target", "node_modules", "dist", "build", ".idea", ".vscode",
+    ];
+    let allow_ext = [
+        "rs", "toml", "md", "yml", "yaml", "json", "ts", "tsx", "js", "jsx", "sh", "py", "go",
+    ];
+    while let Some(dir) = stack.pop() {
+        if out.len() >= limit { break; }
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for ent in entries.flatten() {
+                let path = ent.path();
+                let name = ent.file_name().to_string_lossy().to_string();
+                if ent.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                    if deny_dirs.iter().any(|d| name == *d) { continue; }
+                    stack.push(path);
+                    continue;
+                }
+                // file
+                if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                    if allow_ext.iter().any(|e| e.eq_ignore_ascii_case(ext)) {
+                        if let Ok(rel) = path.strip_prefix(cwd) {
+                            out.insert(rel.to_path_buf());
+                        }
+                    }
+                }
+                if out.len() >= limit { break; }
+            }
+        }
+    }
+    out
 }
 
 async fn git_delta_changed_paths(
