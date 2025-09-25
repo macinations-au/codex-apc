@@ -2195,13 +2195,39 @@ fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
         // Below confidence threshold: do not inject or display anything.
         return None;
     }
-    // Build the detailed context block (trim for safety)
-    if s.len() > 2000 {
-        s.truncate(2000);
+    // Build file references list from header lines only
+    let mut refs: Vec<String> = Vec::new();
+    for line in s.lines() {
+        let l = line.trim();
+        if !l.starts_with("[") { continue; }
+        if let Some(pos) = l.find("]") {
+            let after = l[(pos+1)..].trim();
+            let mut it = after.split_whitespace();
+            let score_tok = it.next();
+            let path_tok = it.next();
+            if let (Some(st), Some(pt)) = (score_tok, path_tok) {
+                if let Ok(sc) = st.parse::<f32>() {
+                    if sc >= threshold {
+                        let (path, rng) = pt.split_once(":").unwrap_or((pt, ""));
+                        refs.push(format!("- @{} {}", path, rng));
+                    }
+                }
+            }
+        }
     }
+    let refs_block = refs.join("\n");
     let ctx = format!(
-        "Context (top matches from local code index):\n\n```text\n{}\n```\n\nUse the above only if relevant.",
-        s
+        concat!(
+            "Local code references — read these first.\n\n",
+            "Instructions:\n",
+            "1) Treat the files below as the primary sources for answering. Read them carefully before any grep/other searches.\n",
+            "2) Only if these sources are insufficient, you may run additional searches.\n",
+            "3) Do not include low-confidence references (< threshold) in your reasoning.\n",
+            "4) Cite file paths and line ranges when you reference code.\n\n",
+            "References:\n",
+            "{}\n"
+        ),
+        refs_block
     );
     // Compact UI summary: show highest confidence as percent and number of items found
     let cf_pct = (top * 100.0).round();
