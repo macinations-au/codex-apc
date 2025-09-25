@@ -356,46 +356,30 @@ fn curate_initial_file_set(cwd: &Path) -> BTreeSet<PathBuf> {
 
 // Minimal workspace scan when curated set is empty. Avoids heavy deps; quick filters.
 fn fallback_scan_workspace(cwd: &Path, limit: usize) -> BTreeSet<PathBuf> {
+    use ignore::WalkBuilder;
     let mut out = BTreeSet::new();
-    let mut stack = vec![cwd.to_path_buf()];
-    let deny_dirs = [
-        ".git",
-        "target",
-        "node_modules",
-        "dist",
-        "build",
-        ".idea",
-        ".vscode",
-    ];
     let allow_ext = [
         "rs", "toml", "md", "yml", "yaml", "json", "ts", "tsx", "js", "jsx", "sh", "py", "go",
     ];
-    while let Some(dir) = stack.pop() {
+    for dent in WalkBuilder::new(cwd)
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .max_depth(None)
+        .build()
+    {
         if out.len() >= limit {
             break;
         }
-        if let Ok(entries) = fs::read_dir(&dir) {
-            for ent in entries.flatten() {
-                let path = ent.path();
-                let name = ent.file_name().to_string_lossy().to_string();
-                if ent.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                    if deny_dirs.iter().any(|d| name == *d) {
-                        continue;
-                    }
-                    stack.push(path);
-                    continue;
-                }
-                // file
-                if let Some(ext) = path.extension().and_then(|s| s.to_str())
-                    && allow_ext.iter().any(|e| e.eq_ignore_ascii_case(ext))
-                    && let Ok(rel) = path.strip_prefix(cwd)
-                {
-                    out.insert(rel.to_path_buf());
-                }
-                if out.len() >= limit {
-                    break;
-                }
-            }
+        let dent = match dent { Ok(d) => d, Err(_) => continue };
+        let path = dent.path();
+        if !path.is_file() { continue; }
+        if let Some(ext) = path.extension().and_then(|s| s.to_str())
+            && allow_ext.iter().any(|e| e.eq_ignore_ascii_case(ext))
+            && let Ok(rel) = path.strip_prefix(cwd)
+        {
+            out.insert(rel.to_path_buf());
         }
     }
     out

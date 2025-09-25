@@ -310,9 +310,9 @@ fn build(args: &crate::IndexBuildArgs) -> Result<()> {
     let mut files: Vec<PathBuf> = Vec::new();
     for dent in WalkBuilder::new(&root)
         .hidden(true)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
         .max_depth(None)
         .build()
     {
