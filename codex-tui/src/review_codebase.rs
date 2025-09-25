@@ -39,6 +39,7 @@ pub struct GitSnapshot {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)]
 pub struct ReviewInputs {
     pub commit_hash: Option<String>,
     pub context_source: &'static str, // "git" | "filesystem"
@@ -134,7 +135,7 @@ pub async fn run_review_codebase(
                 // Compute a fresh prompt (quiet) and ask ChatWidget to run it in background.
                 let candidates = if inside_git {
                     curate_initial_file_set(&cwd)
-                        .union(&git_delta_changed_paths(Some(&prev), &git).await)
+                        .union(&git_delta_changed_paths(&cwd, Some(prev), &git).await)
                         .cloned()
                         .collect::<BTreeSet<PathBuf>>()
                 } else {
@@ -153,7 +154,7 @@ pub async fn run_review_codebase(
                         files.push(entry);
                     }
                 }
-                let prompt = assemble_prompt(&cwd, &git, Some(&prev), &files, 200 * 1024);
+                let prompt = assemble_prompt(&cwd, &git, Some(prev), &files, 200 * 1024);
                 app_tx.send(AppEvent::StartBackgroundAboutRefresh { prompt });
             }
 
@@ -212,7 +213,7 @@ pub async fn run_review_codebase(
     // Determine file set to include (curated + deltas)
     let mut candidates = if inside_git {
         curate_initial_file_set(&cwd)
-            .union(&git_delta_changed_paths(prev.as_ref(), &git).await)
+            .union(&git_delta_changed_paths(&cwd, prev.as_ref(), &git).await)
             .cloned()
             .collect::<BTreeSet<PathBuf>>()
     } else {
@@ -385,12 +386,11 @@ fn fallback_scan_workspace(cwd: &Path, limit: usize) -> BTreeSet<PathBuf> {
                     continue;
                 }
                 // file
-                if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                    if allow_ext.iter().any(|e| e.eq_ignore_ascii_case(ext)) {
-                        if let Ok(rel) = path.strip_prefix(cwd) {
-                            out.insert(rel.to_path_buf());
-                        }
-                    }
+                if let Some(ext) = path.extension().and_then(|s| s.to_str())
+                    && allow_ext.iter().any(|e| e.eq_ignore_ascii_case(ext))
+                    && let Ok(rel) = path.strip_prefix(cwd)
+                {
+                    out.insert(rel.to_path_buf());
                 }
                 if out.len() >= limit {
                     break;
@@ -402,6 +402,7 @@ fn fallback_scan_workspace(cwd: &Path, limit: usize) -> BTreeSet<PathBuf> {
 }
 
 async fn git_delta_changed_paths(
+    cwd: &Path,
     prev: Option<&JsonReport>,
     git: &GitSnapshot,
 ) -> BTreeSet<PathBuf> {
@@ -422,7 +423,12 @@ async fn git_delta_changed_paths(
         "--name-status",
         &format!("{}..{}", prev_commit, cur_commit),
     ];
-    let output = Command::new("git").args(args).output().await.ok();
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .await
+        .ok();
     let Some(output) = output else {
         return out;
     };
@@ -640,9 +646,17 @@ fn assemble_prompt(
 }
 
 pub fn load_previous_report(cwd: &Path) -> anyhow::Result<JsonReport> {
-    let path = find_report_in_ancestors(cwd).ok_or_else(|| {
-        anyhow::anyhow!("no report found under {} or its ancestors", cwd.display())
-    })?;
+    // Prefer a stable workspace root (git toplevel if available) to avoid
+    // per-subdir saves causing misses on the next run.
+    let root = workspace_root_or(cwd);
+    let preferred = root.join(".codex/review-codebase.json");
+    let path = if preferred.exists() {
+        preferred
+    } else {
+        find_report_in_ancestors(cwd).ok_or_else(|| {
+            anyhow::anyhow!("no report found under {} or its ancestors", cwd.display())
+        })?
+    };
     let data = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
     let report: JsonReport =
         serde_json::from_slice(&data).with_context(|| format!("parse JSON {}", path.display()))?;
@@ -650,7 +664,7 @@ pub fn load_previous_report(cwd: &Path) -> anyhow::Result<JsonReport> {
 }
 
 pub async fn save_report_atomic(cwd: &Path, report: &JsonReport) -> anyhow::Result<()> {
-    let dir = cwd.join(".codex");
+    let dir = workspace_root_or(cwd).join(".codex");
     tokio_fs::create_dir_all(&dir).await.ok();
     let final_path = dir.join("review-codebase.json");
     let tmp_path = dir.join("review-codebase.json.tmp");
@@ -670,6 +684,24 @@ fn find_report_in_ancestors(cwd: &Path) -> Option<PathBuf> {
     None
 }
 
+/// Resolve a stable workspace root directory for saving/loading artifacts.
+/// If `cwd` is inside a Git work tree, return `git rev-parse --show-toplevel`.
+/// Otherwise return `cwd`.
+fn workspace_root_or(cwd: &Path) -> PathBuf {
+    if let Ok(out) = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(cwd)
+        .output()
+        && out.status.success()
+    {
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !s.is_empty() {
+            return PathBuf::from(s);
+        }
+    }
+    cwd.to_path_buf()
+}
+
 /// Update the saved report's markdown and basic metadata (time/model/token usage),
 /// preserving existing inputs metadata when present.
 pub async fn update_report_markdown(
@@ -681,7 +713,7 @@ pub async fn update_report_markdown(
     let mut report = load_previous_report(cwd).unwrap_or_else(|_| JsonReport {
         schema: REPORT_SCHEMA.to_string(),
         generated_at: Utc::now(),
-        workspace_root: cwd.to_path_buf(),
+        workspace_root: workspace_root_or(cwd),
         git: GitSnapshot::default(),
         context_source: "filesystem".to_string(),
         model: None,

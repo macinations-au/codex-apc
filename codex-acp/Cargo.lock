@@ -620,6 +620,7 @@ dependencies = [
  "codex-ollama",
  "codex-protocol",
  "fastembed",
+ "lru",
  "memmap2",
  "rayon",
  "serde",

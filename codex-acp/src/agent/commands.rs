@@ -860,10 +860,8 @@ async fn run_codex_agentic(args: Vec<String>) -> String {
             }
             if !o.stderr.is_empty() {
                 if !s.is_empty() {
-                    s.push_str(
-                        "
-",
-                    );
+                    s.push('\n');
+                    s.push(' ');
                 }
                 s.push_str(&String::from_utf8_lossy(&o.stderr));
             }

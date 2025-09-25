@@ -1,3 +1,14 @@
+#![allow(
+    clippy::collapsible_if,
+    clippy::collapsible_else_if,
+    clippy::needless_range_loop,
+    clippy::manual_ok_err,
+    clippy::unnecessary_cast,
+    clippy::default_constructed_unit_structs,
+    clippy::print_with_newline,
+    clippy::get_first,
+    dead_code
+)]
 use anyhow::{Context, Result, bail};
 use ignore::WalkBuilder;
 use regex::Regex;
@@ -686,7 +697,8 @@ fn should_skip(path: &Path) -> bool {
     {
         use std::os::windows::ffi::OsStrExt;
         let wlen = path.as_os_str().encode_wide().count();
-        if wlen > 245 { // ~MAX_PATH minus buffer
+        if wlen > 245 {
+            // ~MAX_PATH minus buffer
             return true;
         }
     }
@@ -907,7 +919,6 @@ fn chunk_rust_treesitter(
     }
     Some(res)
 }
-
 
 fn chunk_python_treesitter(
     text: &str,
@@ -1354,7 +1365,6 @@ fn relative_age(iso: &str) -> Option<String> {
     })
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1367,8 +1377,15 @@ mod tests {
 
     #[test]
     fn chunk_lines_overlap() {
-        let text = (1..=120).map(|i| format!("line{}
-", i)).collect::<String>();
+        let text = (1..=120)
+            .map(|i| {
+                format!(
+                    "line{}
+",
+                    i
+                )
+            })
+            .collect::<String>();
         let chunks = chunk_lines(&text, 40, 10);
         assert!(!chunks.is_empty());
         // Ensure chunks overlap by ~10 lines

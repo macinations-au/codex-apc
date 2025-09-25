@@ -1343,7 +1343,7 @@ pub(crate) fn new_status_output(
         .output()
     {
         Ok(out) if out.status.success() => {
-            let mut s = String::from_utf8_lossy(&out.stdout).to_string();
+            let s = String::from_utf8_lossy(&out.stdout).to_string();
             if s.trim().is_empty() {
                 lines.push("  • (no index info)".dim().into());
             } else {

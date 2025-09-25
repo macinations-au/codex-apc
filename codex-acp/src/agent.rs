@@ -81,6 +81,7 @@ struct SessionState {
     current_model: String,
     current_effort: Option<ReasoningEffortConfig>,
     // Whether this session has already memorized the saved /about-codebase report.
+    #[allow(dead_code)]
     about_memorized: bool,
 }
 
@@ -296,7 +297,7 @@ impl Agent for CodexAgent {
             // Precompute strings before moving into the task to avoid borrowing self.
             let intro_header = format!(
                 "## Codex ACP\n- Version: `{}`\n\n",
-                env!("CARGO_PKG_VERSION")
+                env!("CARGO_PKG_VERSION"),
             );
             let status_string = self.render_status(&sid_str).await;
             task::spawn_local({
@@ -626,16 +627,13 @@ impl Agent for CodexAgent {
         // Build user input submission items from prompt content blocks.
         let mut items: Vec<InputItem> = Vec::new();
         // Retrieval injection (local index) unless disabled
-        if std::env::var("CODEX_INDEX_RETRIEVAL")
+        if !std::env::var("CODEX_INDEX_RETRIEVAL")
             .map(|v| v == "0" || v.eq_ignore_ascii_case("off"))
             .unwrap_or(false)
-            == false
-        {
-            if let Some((ctx, _refs_md)) =
+            && let Some((ctx, _refs_md)) =
                 fetch_retrieval_context(&self.config.cwd, &args.prompt).await
-            {
-                items.push(InputItem::Text { text: ctx });
-            }
+        {
+            items.push(InputItem::Text { text: ctx });
         }
 
         for block in &args.prompt {
@@ -1056,7 +1054,8 @@ impl Agent for CodexAgent {
 }
 
 static EMBEDDER: OnceLock<std::sync::Mutex<fastembed::TextEmbedding>> = OnceLock::new();
-static RETRIEVAL_CACHE: OnceLock<std::sync::Mutex<lru::LruCache<String, (String, String)>>> = OnceLock::new();
+static RETRIEVAL_CACHE: OnceLock<std::sync::Mutex<lru::LruCache<String, (String, String)>>> =
+    OnceLock::new();
 
 fn token_budget() -> usize {
     std::env::var("CODEX_INDEX_CONTEXT_TOKENS")
@@ -1065,7 +1064,9 @@ fn token_budget() -> usize {
         .unwrap_or(800)
 }
 
-fn est_tokens(s: &str) -> usize { (s.len() + 3) / 4 }
+fn est_tokens(s: &str) -> usize {
+    s.len().div_ceil(4)
+}
 
 async fn fetch_retrieval_context(
     cwd: &Path,
@@ -1075,10 +1076,7 @@ async fn fetch_retrieval_context(
     for b in blocks {
         if let ContentBlock::Text(t) = b {
             if !q.is_empty() {
-                q.push_str(
-                    "
-",
-                );
+                q.push('\n');
             }
             q.push_str(&t.text);
         }
@@ -1088,10 +1086,13 @@ async fn fetch_retrieval_context(
     }
     let q: String = q.chars().take(500).collect();
     {
-        let init = || std::sync::Mutex::new(lru::LruCache::new(std::num::NonZeroUsize::new(32).unwrap()));
+        let init =
+            || std::sync::Mutex::new(lru::LruCache::new(std::num::NonZeroUsize::new(32).unwrap()));
         let cache = RETRIEVAL_CACHE.get_or_init(init);
-        if let Ok(mut c) = cache.lock() {
-            if let Some(v) = c.get(&q).cloned() { return Some(v); }
+        if let Ok(mut c) = cache.lock()
+            && let Some(v) = c.get(&q).cloned()
+        {
+            return Some(v);
         }
     }
     // Read manifest
@@ -1185,43 +1186,39 @@ async fn fetch_retrieval_context(
 
     // Build file reference list (no snippets) from top matches over threshold.
     let mut refs: Vec<String> = Vec::new();
-    for (i, _score) in scores
-        .into_iter()
-        .take_while(|(_, s)| *s >= threshold)
-        .take(10)
-        .map(|(i, s)| (i, s))
-    {
+    for (i, _score) in scores.into_iter().take_while(|(_, s)| *s >= threshold) {
         let id = ids[i];
         if let Some(r) = meta.get(&id) {
             refs.push(format!("- @{}:{}-{} ({})", r.path, r.start, r.end, r.lang));
         }
     }
-    let header = format!(
-        concat!(
-            "Local code references — read these first.
-
-",
-            "Instructions:
-",
-            "1) Treat the files below as the primary sources for answering. Read them carefully before any grep/other searches.
-",
-            "2) Only if these sources are insufficient, you may run additional searches.
-",
-            "3) Do not include low-confidence references (< threshold) in your reasoning.
-",
-            "4) Cite file paths and line ranges when you reference code.
-
-",
-            "References:
-"
-        )
-    );
+    let header = concat!(
+        "Local code references — read these first.\n\n",
+        "Instructions:\n",
+        "1) Treat the files below as the primary sources for answering. Read them carefully before any grep/other searches.\n",
+        "2) Only if these sources are insufficient, you may run additional searches.\n",
+        "3) Do not include low-confidence references (< threshold) in your reasoning.\n",
+        "4) Cite file paths and line ranges when you reference code.\n\n",
+        "References:\n",
+    ).to_string();
     let mut ctx = header.clone();
     let budget = token_budget();
-    for line in refs { if est_tokens(&(ctx.clone() + &line)) > budget { break; } ctx.push_str(&line); ctx.push('\n'); }
+    for line in refs {
+        if est_tokens(&(ctx.clone() + &line)) > budget {
+            break;
+        }
+        ctx.push_str(&line);
+        ctx.push('\n');
+    }
     let cf_pct = (top * 100.0).round();
     let summary = format!("> {:.0}% -- {} items found", cf_pct, found);
-    { let out=(ctx.clone(), summary.clone()); if let Ok(mut c)=RETRIEVAL_CACHE.get().unwrap().lock(){ c.put(q.clone(), out.clone()); } Some(out) }
+    {
+        let out = (ctx.clone(), summary.clone());
+        if let Ok(mut c) = RETRIEVAL_CACHE.get().unwrap().lock() {
+            c.put(q.clone(), out.clone());
+        }
+        Some(out)
+    }
 }
 fn load_vectors_mmap(p: &Path) -> Result<(Vec<u64>, Vec<f32>), ()> {
     use memmap2::MmapOptions;
@@ -1265,6 +1262,7 @@ struct MetaLite {
     start: usize,
     end: usize,
     lang: String,
+    #[allow(dead_code)]
     preview: String,
 }
 fn load_meta_jsonl(p: &Path) -> Result<std::collections::HashMap<u64, MetaLite>, ()> {

@@ -1,20 +1,23 @@
-FROM rust:1.89-bullseye
+FROM ubuntu:24.04
 
-# Minimal build tooling used by upstream crates (reqwest/openssl, etc.)
+# Base tooling and OpenSSL 3
 RUN apt-get update -qq \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-    pkg-config \
-    libssl-dev \
     ca-certificates \
-    git \
     curl \
- && apt-get clean \
+    git \
+    pkg-config \
+    build-essential \
+    libssl-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# Keep cargo/git networking stable on CI-like networks
-ENV CARGO_NET_GIT_FETCH_WITH_CLI=true \
+# Install Rust 1.89 + components via rustup (matches CI pin)
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain 1.89.0 --profile minimal \
+ && /root/.cargo/bin/rustup component add clippy rustfmt
+
+ENV PATH=/root/.cargo/bin:$PATH \
+    CARGO_NET_GIT_FETCH_WITH_CLI=true \
     RUST_BACKTRACE=1
 
 # Workspace will be mounted at /w when running the container
 WORKDIR /w
-

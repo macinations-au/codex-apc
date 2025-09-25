@@ -254,7 +254,6 @@ impl ChatWidget {
         }));
     }
 
-
     pub(crate) fn enable_about_save_once(&mut self) {
         self.pending_about_save = true;
     }
@@ -1050,10 +1049,8 @@ impl ChatWidget {
                             let mut args: Vec<String> = vec!["index".into()];
                             if args_text.is_empty() {
                                 args.push("status".into());
-                            } else {
-                                if let Some(tokens) = shlex::split(args_text) {
-                                    args.extend(tokens);
-                                }
+                            } else if let Some(tokens) = shlex::split(args_text) {
+                                args.extend(tokens);
                             }
                             let cfg = self.config.clone();
                             let tx = self.app_event_tx.clone();
@@ -1337,10 +1334,9 @@ impl ChatWidget {
         let mut items: Vec<InputItem> = Vec::new();
 
         // Retrieval injection (local index) unless disabled
-        if std::env::var("CODEX_INDEX_RETRIEVAL")
+        if !std::env::var("CODEX_INDEX_RETRIEVAL")
             .map(|v| v == "0" || v.eq_ignore_ascii_case("off"))
             .unwrap_or(false)
-            == false
         {
             if let Some((ctx, summary)) = fetch_retrieval_context_plus(&text) {
                 // Display compact index status in the footer (not in the chat history).
@@ -2117,9 +2113,19 @@ fn extract_first_bold(s: &str) -> Option<String> {
 #[cfg(test)]
 pub(crate) mod tests;
 
-fn token_budget_env() -> usize { std::env::var("CODEX_INDEX_CONTEXT_TOKENS").ok().and_then(|s| s.parse::<usize>().ok()).unwrap_or(800) }
-fn est_tokens(s: &str) -> usize { (s.len() + 3) / 4 }
+#[allow(dead_code)]
+fn token_budget_env() -> usize {
+    std::env::var("CODEX_INDEX_CONTEXT_TOKENS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(800)
+}
+#[allow(dead_code)]
+fn est_tokens(s: &str) -> usize {
+    s.len().div_ceil(4)
+}
 
+#[allow(dead_code)]
 fn fetch_retrieval_context(query: &str) -> Option<String> {
     if query.trim().is_empty() {
         return None;
@@ -2137,7 +2143,7 @@ fn fetch_retrieval_context(query: &str) -> Option<String> {
     if !out.status.success() {
         return None;
     }
-    let mut s = String::from_utf8_lossy(&out.stdout).to_string();
+    let s = String::from_utf8_lossy(&out.stdout).to_string();
     if s.trim().is_empty() {
         return None;
     }
@@ -2145,12 +2151,22 @@ fn fetch_retrieval_context(query: &str) -> Option<String> {
     let budget = token_budget_env();
     let mut acc = String::new();
     for line in s.lines() {
-        if est_tokens(&(acc.clone() + line)) > budget { break; }
+        if est_tokens(&(acc.clone() + line)) > budget {
+            break;
+        }
         acc.push_str(line);
         acc.push('\n');
     }
     Some(format!(
-        concat!("Context (top matches from local code index) — read these first:\n\n","```text\n{}\n```\n\n","Instructions:\n","1) Treat the above files as the primary sources for answering. Read them carefully before any grep/other searches.\n","2) Only if these sources are insufficient, you may run additional searches.\n","3) Do not include low-confidence references (< threshold) in your reasoning.\n","4) Cite file paths and line ranges when you reference code.\n"),
+        concat!(
+            "Context (top matches from local code index) — read these first:\n\n",
+            "```text\n{}\n```\n\n",
+            "Instructions:\n",
+            "1) Treat the above files as the primary sources for answering. Read them carefully before any grep/other searches.\n",
+            "2) Only if these sources are insufficient, you may run additional searches.\n",
+            "3) Do not include low-confidence references (< threshold) in your reasoning.\n",
+            "4) Cite file paths and line ranges when you reference code.\n"
+        ),
         acc
     ))
 }
@@ -2174,14 +2190,17 @@ fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
     if !out.status.success() {
         return None;
     }
-    let mut s = String::from_utf8_lossy(&out.stdout).to_string();
+    let s = String::from_utf8_lossy(&out.stdout).to_string();
     if s.trim().is_empty() {
         return None;
     }
     // Determine top confidence and count of items over threshold from header lines
     let mut top_score: Option<f32> = None;
     let mut found: usize = 0;
-    let threshold: f32 = std::env::var("CODEX_INDEX_RETRIEVAL_THRESHOLD")        .ok()        .and_then(|v| v.parse::<f32>().ok())        .unwrap_or(0.65);
+    let threshold: f32 = std::env::var("CODEX_INDEX_RETRIEVAL_THRESHOLD")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.65);
     for line in s.lines() {
         let l = line.trim();
         if !l.starts_with('[') {
@@ -2191,14 +2210,14 @@ fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
         // parse score token after the first closing bracket
         if let Some(pos) = l.find(']') {
             let after = l[(pos + 1)..].trim();
-            if let Some(score_tok) = after.split_whitespace().next() {
-                if let Ok(sc) = score_tok.parse::<f32>() {
-                    if top_score.is_none() {
-                        top_score = Some(sc);
-                    }
-                    if sc >= threshold {
-                        found += 1;
-                    }
+            if let Some(score_tok) = after.split_whitespace().next()
+                && let Ok(sc) = score_tok.parse::<f32>()
+            {
+                if top_score.is_none() {
+                    top_score = Some(sc);
+                }
+                if sc >= threshold {
+                    found += 1;
                 }
             }
         }
@@ -2212,19 +2231,20 @@ fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
     let mut refs: Vec<String> = Vec::new();
     for line in s.lines() {
         let l = line.trim();
-        if !l.starts_with("[") { continue; }
+        if !l.starts_with("[") {
+            continue;
+        }
         if let Some(pos) = l.find("]") {
-            let after = l[(pos+1)..].trim();
+            let after = l[(pos + 1)..].trim();
             let mut it = after.split_whitespace();
             let score_tok = it.next();
             let path_tok = it.next();
-            if let (Some(st), Some(pt)) = (score_tok, path_tok) {
-                if let Ok(sc) = st.parse::<f32>() {
-                    if sc >= threshold {
-                        let (path, rng) = pt.split_once(":").unwrap_or((pt, ""));
-                        refs.push(format!("- @{} {}", path, rng));
-                    }
-                }
+            if let (Some(st), Some(pt)) = (score_tok, path_tok)
+                && let Ok(sc) = st.parse::<f32>()
+                && sc >= threshold
+            {
+                let (path, rng) = pt.split_once(":").unwrap_or((pt, ""));
+                refs.push(format!("- @{} {}", path, rng));
             }
         }
     }
@@ -2292,19 +2312,18 @@ impl ChatWidget {
                     .arg("index")
                     .arg("status")
                     .output()
+                    && out.status.success()
                 {
-                    if out.status.success() {
-                        let s = String::from_utf8_lossy(&out.stdout);
-                        if let Some(line) = s
-                            .lines()
-                            .find(|l| l.trim_start().starts_with("Last indexed:"))
-                        {
-                            let rel = line.trim_start().trim_start_matches("Last indexed:").trim();
-                            if !rel.is_empty() {
-                                self.bottom_pane
-                                    .set_index_last_updated(Some(format!("Indexed {}", rel)));
-                                return;
-                            }
+                    let s = String::from_utf8_lossy(&out.stdout);
+                    if let Some(line) = s
+                        .lines()
+                        .find(|l| l.trim_start().starts_with("Last indexed:"))
+                    {
+                        let rel = line.trim_start().trim_start_matches("Last indexed:").trim();
+                        if !rel.is_empty() {
+                            self.bottom_pane
+                                .set_index_last_updated(Some(format!("Indexed {}", rel)));
+                            return;
                         }
                     }
                 }
@@ -2332,12 +2351,11 @@ impl ChatWidget {
             .parent()
             .map(|d| d.join("analytics.json"))
             .unwrap_or_else(|| PathBuf::from(".codex/index/analytics.json"));
-        if let Ok(at) = std::fs::read_to_string(&ap) {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&at) {
-                if let Some(ts) = val.get("last_attempt_ts").and_then(|x| x.as_str()) {
-                    attempt_rel = compute_relative_age(ts);
-                }
-            }
+        if let Ok(at) = std::fs::read_to_string(&ap)
+            && let Ok(val) = serde_json::from_str::<serde_json::Value>(&at)
+            && let Some(ts) = val.get("last_attempt_ts").and_then(|x| x.as_str())
+        {
+            attempt_rel = compute_relative_age(ts);
         }
         let line = match (idx_rel, attempt_rel) {
             (Some(i), Some(a)) => format!("Indexed {} • Checked {}", i, a),
@@ -2352,7 +2370,6 @@ impl ChatWidget {
         }
     }
 }
-
 // --- Post‑turn index refresh trigger (non‑blocking) ---
 fn maybe_trigger_post_turn_index_refresh() {
     use std::sync::{Mutex, OnceLock};

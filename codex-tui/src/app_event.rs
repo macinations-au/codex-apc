@@ -75,6 +75,7 @@ pub(crate) enum AppEvent {
     /// Internal: ask ChatWidget to submit a one-off memorize turn for the
     /// current session using the provided report markdown. If already
     /// memorized in this session, it is a no-op.
+    #[allow(dead_code)]
     MemorizeReportIfNeeded(String),
     /// Show a short-lived notice in the footer (e.g., background tasks).
     FooterNotice(String),
