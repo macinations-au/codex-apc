@@ -253,7 +253,9 @@ pub async fn run_review_codebase(
     )));
     let prompt = assemble_prompt(&cwd, &git, prev.as_ref(), &files, 200 * 1024);
 
-    // Submit to model via standard user input
+    // Submit to model via standard user input. Ensure the result is persisted
+    // as the initial /about-codebase report when no previous report exists.
+    app_tx.send(AppEvent::EnableAboutSaveOnce);
     app_tx.send(AppEvent::CodexOp(Op::UserInput {
         items: vec![InputItem::Text {
             text: prompt.clone(),

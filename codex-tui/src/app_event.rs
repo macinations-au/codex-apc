@@ -83,4 +83,8 @@ pub(crate) enum AppEvent {
     StartBackgroundAboutRefresh {
         prompt: String,
     },
+
+    /// Enable saving the next assistant message as the /about-codebase report.
+    /// Used by the review_codebase flow to persist the initial foreground build.
+    EnableAboutSaveOnce,
 }

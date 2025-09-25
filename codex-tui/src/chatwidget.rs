@@ -254,6 +254,11 @@ impl ChatWidget {
         }));
     }
 
+
+    pub(crate) fn enable_about_save_once(&mut self) {
+        self.pending_about_save = true;
+    }
+
     pub(crate) fn set_footer_notice(&mut self, text: String, duration: std::time::Duration) {
         self.bottom_pane.set_index_status(Some(text));
         let tx = self.app_event_tx.clone();

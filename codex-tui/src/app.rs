@@ -313,6 +313,9 @@ impl App {
             AppEvent::StartBackgroundAboutRefresh { prompt } => {
                 self.chat_widget.start_background_about_refresh(prompt);
             }
+            AppEvent::EnableAboutSaveOnce => {
+                self.chat_widget.enable_about_save_once();
+            }
             AppEvent::ExitRequest => {
                 return Ok(false);
             }
