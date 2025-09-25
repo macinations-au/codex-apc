@@ -1165,39 +1165,47 @@ async fn fetch_retrieval_context(
         return None;
     }
 
-    // Build detailed context for the model from top matches over threshold.
-    let mut out = String::new();
-    for (rank, (i, score)) in scores
+    // Build file reference list (no snippets) from top matches over threshold.
+    let mut refs: Vec<String> = Vec::new();
+    for (i, _score) in scores
         .into_iter()
         .take_while(|(_, s)| *s >= threshold)
-        .take(5)
-        .enumerate()
+        .take(10)
+        .map(|(i, s)| (i, s))
     {
         let id = ids[i];
         if let Some(r) = meta.get(&id) {
-            out.push_str(&format!(
-                "[{rank}] {score:.3} {}:{}-{} ({})\n",
-                r.path, r.start, r.end, r.lang
-            ));
-            let mut prev = r.preview.clone();
-            if prev.len() > 600 {
-                prev.truncate(600);
-            }
-            out.push_str(&prev);
-            out.push_str("\n---\n");
+            refs.push(format!("- @{}:{}-{} ({})", r.path, r.start, r.end, r.lang));
         }
     }
-    if out.len() > 2000 {
-        out.truncate(2000);
-    }
+    let refs_block = refs.join("
+");
     let ctx = format!(
-        "Context (top matches from local code index):\n\n```text\n{}\n```\n\nUse the above only if relevant.",
-        out
+        concat!(
+            "Local code references — read these first.
+
+",
+            "Instructions:
+",
+            "1) Treat the files below as the primary sources for answering. Read them carefully before any grep/other searches.
+",
+            "2) Only if these sources are insufficient, you may run additional searches.
+",
+            "3) Do not include low-confidence references (< threshold) in your reasoning.
+",
+            "4) Cite file paths and line ranges when you reference code.
+
+",
+            "References:
+",
+            "{refs}
+"
+        ),
+        refs = refs_block
     );
-    // Compact UI summary: top confidence as percent and number of items found.
     let cf_pct = (top * 100.0).round();
-    let refs_md = format!("> {:.0}% -- {} items found\n\n", cf_pct, found);
-    Some((ctx, refs_md))
+    let summary = format!("> {:.0}% -- {} items found", cf_pct, found);
+    Some((ctx, summary))
 }
 fn load_vectors_mmap(p: &Path) -> Result<(Vec<u64>, Vec<f32>), ()> {
     use memmap2::MmapOptions;
