@@ -306,7 +306,7 @@ codex-agentic index ignore --reset --list
 
 
 Notes
-- MVP focuses on correctness and UX. Index persistence is flat vectors + JSONL with atomic writes; HNSW graph storage is planned.
+- MVP focuses on correctness and UX. Index persistence uses flat vectors + JSONL with atomic writes and a persisted HNSW graph for fast ANN queries.
 - Chunking defaults to `auto` with a Rust tree‑sitter path; falls back to blank‑line blocks. A `lines` mode is available with `--chunk lines`.
 
 Update & Version
@@ -340,7 +340,8 @@ What’s New: Local Indexing & Retrieval
 --------------------------------------
 - New CLI: `codex-agentic index {build,query,status,verify,clean}`.
 - New slash commands: `/index …` and `/search …` in both TUI and ACP.
-- Retrieval: optional automatic context injection from the local index, gated by `CODEX_INDEX_RETRIEVAL_THRESHOLD` (default 0.725). Disable with `CODEX_INDEX_RETRIEVAL=0`.
+- Retrieval: optional automatic context injection from the local index, gated by `CODEX_INDEX_RETRIEVAL_THRESHOLD` (defaults 0.60–0.65 depending on client). Disable with `CODEX_INDEX_RETRIEVAL=0`.
+- Token budget: cap injected context with `CODEX_INDEX_CONTEXT_TOKENS` (approximate tokens; default 800).
 - UX: TUI footer displays “Indexed … • Checked …” and a compact confidence summary while composing.
 
 Notes

@@ -675,6 +675,21 @@ fn should_skip(path: &Path) -> bool {
             }
         }
     }
+    // Skip symlinks to avoid cycles and out-of-tree traversal
+    if let Ok(md) = fs::symlink_metadata(path) {
+        if md.file_type().is_symlink() {
+            return true;
+        }
+    }
+    // Conservative Windows path handling: skip very long paths
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let wlen = path.as_os_str().encode_wide().count();
+        if wlen > 245 { // ~MAX_PATH minus buffer
+            return true;
+        }
+    }
     if let Ok(md) = fs::metadata(path) {
         if md.len() > 5 * 1024 * 1024 {
             return true;
@@ -727,6 +742,11 @@ fn chunk_auto(
 ) -> Vec<(usize, usize, String)> {
     if lang == "rust" {
         if let Some(chunks) = chunk_rust_treesitter(text, target, overlap) {
+            return chunks;
+        }
+    }
+    if lang == "python" {
+        if let Some(chunks) = chunk_python_treesitter(text, target, overlap) {
             return chunks;
         }
     }
@@ -849,6 +869,62 @@ fn chunk_rust_treesitter(
             kind,
             "function_item" | "impl_item" | "trait_item" | "struct_item" | "enum_item" | "mod_item"
         ) {
+            let r = node.range();
+            out.push((r.start_byte, r.end_byte));
+        }
+        for i in 0..node.child_count() {
+            if let Some(ch) = node.child(i) {
+                collect(ch, out);
+            }
+        }
+    }
+    collect(root, &mut ranges);
+    if ranges.is_empty() {
+        return None;
+    }
+    ranges.sort_by_key(|r| r.0);
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    let mut cur = ranges[0];
+    for r in ranges.into_iter().skip(1) {
+        if line_span(text, cur.0, r.1) < target {
+            cur.1 = r.1;
+        } else {
+            merged.push(cur);
+            cur = r;
+        }
+    }
+    merged.push(cur);
+    let mut res = Vec::new();
+    for (s, e) in merged {
+        res.push((s, e, preview(&text[s..e])));
+    }
+    if overlap > 0 && res.len() > 1 {
+        for i in 1..res.len() {
+            let (s, e, pr) = res[i].clone();
+            let new_s = back_n_lines(text, s, overlap);
+            res[i] = (new_s, e, pr);
+        }
+    }
+    Some(res)
+}
+
+
+fn chunk_python_treesitter(
+    text: &str,
+    target: usize,
+    overlap: usize,
+) -> Option<Vec<(usize, usize, String)>> {
+    let mut parser = tree_sitter::Parser::new();
+    let lang_ts: tree_sitter::Language = tree_sitter_python::LANGUAGE.into();
+    if parser.set_language(&lang_ts).is_err() {
+        return None;
+    }
+    let tree = parser.parse(text, None)?;
+    let root = tree.root_node();
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    fn collect(node: tree_sitter::Node, out: &mut Vec<(usize, usize)>) {
+        let kind = node.kind();
+        if matches!(kind, "function_definition" | "class_definition") {
             let r = node.range();
             out.push((r.start_byte, r.end_byte));
         }
@@ -1276,4 +1352,42 @@ fn relative_age(iso: &str) -> Option<String> {
     } else {
         format!("{}w ago", secs / (86400 * 7))
     })
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_binary_png() {
+        let png: &[u8] = b"\x89PNG\r\n\x1a\nrest";
+        assert!(looks_binary(png));
+    }
+
+    #[test]
+    fn chunk_lines_overlap() {
+        let text = (1..=120).map(|i| format!("line{}
+", i)).collect::<String>();
+        let chunks = chunk_lines(&text, 40, 10);
+        assert!(!chunks.is_empty());
+        // Ensure chunks overlap by ~10 lines
+        if chunks.len() > 1 {
+            let (s0, e0, _) = chunks[0].clone();
+            let (s1, _e1, _) = chunks[1].clone();
+            let l0_end = offset_to_line(&text, e0);
+            let l1_start = offset_to_line(&text, s1);
+            assert!(l1_start <= l0_end);
+        }
+    }
+
+    #[test]
+    fn xml_escape_basic() {
+        let s = r#"<tag> & " ' ;"#;
+        let e = xml_escape(s);
+        assert!(e.contains("&lt;tag&gt;"));
+        assert!(e.contains("&amp;"));
+        assert!(e.contains("&quot;"));
+        assert!(e.contains("&apos;"));
+    }
 }

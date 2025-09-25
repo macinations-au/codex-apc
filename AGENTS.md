@@ -10,7 +10,11 @@ Scope
 - Match existing style and structure.
 - Prefer root‑cause fixes over band‑aids.
 - Ask before making destructive changes.
-
+### Context - Codebase - information indexed search **- MUST DO**
+- To aid in locating sources of code, a semantic search pre-result might be provided. You **MUST** use those results first before any other tools to find other places of concern or investigation in the code.
+- If no pre results or list of files are provided then you must also utilise the semantic search on the codebase index by running the following tool with a natural language request you will need to run this bash command `codex-agentic search-codebase <query prompt> -k 8 --show-snippets --output json`
+- or - To just locate the files in the codebase run `codex-agentic search-codebase <query prompt> --output json` : example : `codex-agentic search-code "where is santa clause ?" -k 8 --show-snippets  --diff`
+- use the search information to quickly find documents, code and information in the system quickly without grep'ing. use grep or other approved tools as a last resort.
 ### Build and Install **- MUST DO**
 - Once the changes have been implemented, always perform the release build and ** install ** in the global cargo bin for the user to test
 

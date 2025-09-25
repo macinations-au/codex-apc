@@ -2112,6 +2112,9 @@ fn extract_first_bold(s: &str) -> Option<String> {
 #[cfg(test)]
 pub(crate) mod tests;
 
+fn token_budget_env() -> usize { std::env::var("CODEX_INDEX_CONTEXT_TOKENS").ok().and_then(|s| s.parse::<usize>().ok()).unwrap_or(800) }
+fn est_tokens(s: &str) -> usize { (s.len() + 3) / 4 }
+
 fn fetch_retrieval_context(query: &str) -> Option<String> {
     if query.trim().is_empty() {
         return None;
@@ -2133,12 +2136,17 @@ fn fetch_retrieval_context(query: &str) -> Option<String> {
     if s.trim().is_empty() {
         return None;
     }
-    if s.len() > 2000 {
-        s.truncate(2000);
+    // Token-aware trim
+    let budget = token_budget_env();
+    let mut acc = String::new();
+    for line in s.lines() {
+        if est_tokens(&(acc.clone() + line)) > budget { break; }
+        acc.push_str(line);
+        acc.push('\n');
     }
     Some(format!(
         concat!("Context (top matches from local code index) — read these first:\n\n","```text\n{}\n```\n\n","Instructions:\n","1) Treat the above files as the primary sources for answering. Read them carefully before any grep/other searches.\n","2) Only if these sources are insufficient, you may run additional searches.\n","3) Do not include low-confidence references (< threshold) in your reasoning.\n","4) Cite file paths and line ranges when you reference code.\n"),
-        s
+        acc
     ))
 }
 

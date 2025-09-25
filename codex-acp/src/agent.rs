@@ -1056,6 +1056,17 @@ impl Agent for CodexAgent {
 }
 
 static EMBEDDER: OnceLock<std::sync::Mutex<fastembed::TextEmbedding>> = OnceLock::new();
+static RETRIEVAL_CACHE: OnceLock<std::sync::Mutex<lru::LruCache<String, (String, String)>>> = OnceLock::new();
+
+fn token_budget() -> usize {
+    std::env::var("CODEX_INDEX_CONTEXT_TOKENS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(800)
+}
+
+fn est_tokens(s: &str) -> usize { (s.len() + 3) / 4 }
+
 async fn fetch_retrieval_context(
     cwd: &Path,
     blocks: &Vec<ContentBlock>,
@@ -1076,6 +1087,13 @@ async fn fetch_retrieval_context(
         return None;
     }
     let q: String = q.chars().take(500).collect();
+    {
+        let init = || std::sync::Mutex::new(lru::LruCache::new(std::num::NonZeroUsize::new(32).unwrap()));
+        let cache = RETRIEVAL_CACHE.get_or_init(init);
+        if let Ok(mut c) = cache.lock() {
+            if let Some(v) = c.get(&q).cloned() { return Some(v); }
+        }
+    }
     // Read manifest
     let base = cwd.join(".codex/index");
     let manifest_path = if base.join("manifest.json").exists() {
@@ -1178,9 +1196,7 @@ async fn fetch_retrieval_context(
             refs.push(format!("- @{}:{}-{} ({})", r.path, r.start, r.end, r.lang));
         }
     }
-    let refs_block = refs.join("
-");
-    let ctx = format!(
+    let header = format!(
         concat!(
             "Local code references — read these first.
 
@@ -1197,15 +1213,15 @@ async fn fetch_retrieval_context(
 
 ",
             "References:
-",
-            "{refs}
 "
-        ),
-        refs = refs_block
+        )
     );
+    let mut ctx = header.clone();
+    let budget = token_budget();
+    for line in refs { if est_tokens(&(ctx.clone() + &line)) > budget { break; } ctx.push_str(&line); ctx.push('\n'); }
     let cf_pct = (top * 100.0).round();
     let summary = format!("> {:.0}% -- {} items found", cf_pct, found);
-    Some((ctx, summary))
+    { let out=(ctx.clone(), summary.clone()); if let Ok(mut c)=RETRIEVAL_CACHE.get().unwrap().lock(){ c.put(q.clone(), out.clone()); } Some(out) }
 }
 fn load_vectors_mmap(p: &Path) -> Result<(Vec<u64>, Vec<f32>), ()> {
     use memmap2::MmapOptions;
