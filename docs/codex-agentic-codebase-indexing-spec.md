@@ -208,7 +208,7 @@ Phase 3 — Background Refresh (timer-based MVP in place; git-delta full rebuild
 
 Phase 4 — Enhancements
 - [x] Add `--model bge-large` (1024‑D) path
-- [ ] Add second grammar (TypeScript or Python)
+- [x] Add second grammar (Python)
 - [ ] Add query-context option (include last 1–2 turns)
 
 ---
@@ -252,7 +252,7 @@ Phase 2 — ACP/TUI
   - [ ] TUI: in‑process retrieval (FastEmbed + mmap + rayon)
   - [x] TUI: compact summary in footer; no chat spam
   - [x] TUI: add `/index` and `/search` (shell out to codex-agentic)
-- [ ] Add CLI `index query --json` output for richer UI rendering
+
 
 Phase 3 — Refresh & Scheduling
 - [x] Replace 5‑min timer with post‑turn refresh trigger (git‑delta)
@@ -265,12 +265,13 @@ Phase 5 — About‑Codebase UX
 - [x] ACP: if a saved report exists, send it directly; `--refresh` required to rebuild
 
 Phase 4 — Enhancements
-- [ ] Token‑aware context budget using active model’s token limits
-- [ ] Add second tree‑sitter grammar (TypeScript or Python) + fallback heuristics polish
-- [ ] Add small LRU cache for recent queries (avoid re‑scoring repeats)
-- [ ] Windows/symlink policy + long‑path handling
-- [ ] Unit tests (binary detection, chunkers, manifest I/O, analytics) + integration tests (build→query)
-- [ ] READMEs: user flags/env + `/status` fields + troubleshooting
+- [x] Token‑aware context budget (env: CODEX_INDEX_CONTEXT_TOKENS); model-limit auto-detect TBD
+- [x] Add second tree‑sitter grammar (Python)
+- [ ] Fallback heuristics polish (blank-line merges, windowing)
+- [x] Add small LRU cache for recent queries (ACP)
+- [x] Windows/symlink policy + long‑path handling
+- [ ] Unit tests (manifest I/O, analytics) + integration tests (build→query)
+- [x] READMEs: user flags/env + `/status` fields (troubleshooting TBD)
 
 ### Resume Pointers
 - HNSW integration entry points:
