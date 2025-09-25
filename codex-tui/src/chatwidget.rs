@@ -2137,13 +2137,7 @@ fn fetch_retrieval_context(query: &str) -> Option<String> {
         s.truncate(2000);
     }
     Some(format!(
-        "Context (top matches from local code index):
-
-```text
-{}
-```
-
-Use the above only if relevant.",
+        concat!("Context (top matches from local code index) — read these first:\n\n","```text\n{}\n```\n\n","Instructions:\n","1) Treat the above files as the primary sources for answering. Read them carefully before any grep/other searches.\n","2) Only if these sources are insufficient, you may run additional searches.\n","3) Do not include low-confidence references (< threshold) in your reasoning.\n","4) Cite file paths and line ranges when you reference code.\n"),
         s
     ))
 }
@@ -2174,7 +2168,7 @@ fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
     // Determine top confidence and count of items over threshold from header lines
     let mut top_score: Option<f32> = None;
     let mut found: usize = 0;
-    const THRESHOLD: f32 = 0.725;
+    let threshold: f32 = std::env::var("CODEX_INDEX_RETRIEVAL_THRESHOLD")        .ok()        .and_then(|v| v.parse::<f32>().ok())        .unwrap_or(0.65);
     for line in s.lines() {
         let l = line.trim();
         if !l.starts_with('[') {
@@ -2189,7 +2183,7 @@ fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
                     if top_score.is_none() {
                         top_score = Some(sc);
                     }
-                    if sc >= THRESHOLD {
+                    if sc >= threshold {
                         found += 1;
                     }
                 }
@@ -2197,7 +2191,7 @@ fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
         }
     }
     let top = top_score.unwrap_or(0.0);
-    if top < THRESHOLD {
+    if top < threshold {
         // Below confidence threshold: do not inject or display anything.
         return None;
     }
@@ -2211,7 +2205,7 @@ fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
     );
     // Compact UI summary: show highest confidence as percent and number of items found
     let cf_pct = (top * 100.0).round();
-    let summary_md = format!("> {:.0}% -- {} items found\n\n", cf_pct, found);
+    let summary_md = format!("> {:.0}% -- {} items found", cf_pct, found);
     Some((ctx, summary_md))
 }
 
