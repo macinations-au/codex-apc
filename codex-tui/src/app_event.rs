@@ -80,5 +80,7 @@ pub(crate) enum AppEvent {
     FooterNotice(String),
     ClearFooterNotice,
     /// Start a background rebuild of the codebase report without streaming into chat.
-    StartBackgroundAboutRefresh { prompt: String },
+    StartBackgroundAboutRefresh {
+        prompt: String,
+    },
 }

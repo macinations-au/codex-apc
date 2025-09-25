@@ -54,7 +54,9 @@ impl SlashCommand {
             SlashCommand::Model => "choose what model and reasoning effort to use",
             SlashCommand::Approvals => "choose what Codex can do without approval",
             SlashCommand::Mcp => "list configured MCP tools",
-            SlashCommand::Index => "manage local index: /index status | build [--model bge-small|bge-large] [--force] | verify | clean",
+            SlashCommand::Index => {
+                "manage local index: /index status | build [--model bge-small|bge-large] [--force] | verify | clean"
+            }
             SlashCommand::Search => "semantic search in codebase (local): /search <query> [-k N]",
             SlashCommand::Reasoning => "show/hide thinking: hidden | summary | raw",
             SlashCommand::Logout => "log out of Codex",

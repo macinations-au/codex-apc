@@ -10,10 +10,10 @@ Scope
 - Match existing style and structure.
 - Prefer root‑cause fixes over band‑aids.
 - Ask before making destructive changes.
-- To aid in locating sources of code, a presearch result will be provided. It is highly recommended that you use that search result before you attempt to find other places of concern in the code.
-- To perform semantic search on the codebase run replace the query prompt with a natural language request eg 'where are the index status bar references ?' --> `codex-agentic search-code <query prompt> -k 8 --show-snippets --output json`
-- or - To just locate the files in the codebase run `codex-agentic search-code <query prompt> --output json` : example : `codex-agentic search-code "index status bar" -k 1 --show-snippets  --diff`
+
+### Build and Install **- MUST DO**
 - Once the changes have been implemented, always perform the release build and ** install ** in the global cargo bin for the user to test
+
 
 
 ## Formatting (Markdown)

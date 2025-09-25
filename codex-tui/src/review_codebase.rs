@@ -128,7 +128,9 @@ pub async fn run_review_codebase(
             };
             if is_stale || changed {
                 // Auto-refresh quietly in the background. Show footer notice only.
-                app_tx.send(AppEvent::FooterNotice("Building codebase report…".to_string()));
+                app_tx.send(AppEvent::FooterNotice(
+                    "Building codebase report…".to_string(),
+                ));
                 // Compute a fresh prompt (quiet) and ask ChatWidget to run it in background.
                 let candidates = if inside_git {
                     curate_initial_file_set(&cwd)
@@ -270,7 +272,9 @@ pub(crate) fn run_local_cli_capture(cwd: &Path, args: Vec<String>) -> String {
     use std::process::Command as StdCommand;
     let mut cmd = StdCommand::new("codex-agentic");
     cmd.current_dir(cwd);
-    for a in args { cmd.arg(a); }
+    for a in args {
+        cmd.arg(a);
+    }
     match cmd.output() {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
         Ok(out) => {
@@ -352,19 +356,29 @@ fn fallback_scan_workspace(cwd: &Path, limit: usize) -> BTreeSet<PathBuf> {
     let mut out = BTreeSet::new();
     let mut stack = vec![cwd.to_path_buf()];
     let deny_dirs = [
-        ".git", "target", "node_modules", "dist", "build", ".idea", ".vscode",
+        ".git",
+        "target",
+        "node_modules",
+        "dist",
+        "build",
+        ".idea",
+        ".vscode",
     ];
     let allow_ext = [
         "rs", "toml", "md", "yml", "yaml", "json", "ts", "tsx", "js", "jsx", "sh", "py", "go",
     ];
     while let Some(dir) = stack.pop() {
-        if out.len() >= limit { break; }
+        if out.len() >= limit {
+            break;
+        }
         if let Ok(entries) = fs::read_dir(&dir) {
             for ent in entries.flatten() {
                 let path = ent.path();
                 let name = ent.file_name().to_string_lossy().to_string();
                 if ent.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                    if deny_dirs.iter().any(|d| name == *d) { continue; }
+                    if deny_dirs.iter().any(|d| name == *d) {
+                        continue;
+                    }
                     stack.push(path);
                     continue;
                 }
@@ -376,7 +390,9 @@ fn fallback_scan_workspace(cwd: &Path, limit: usize) -> BTreeSet<PathBuf> {
                         }
                     }
                 }
-                if out.len() >= limit { break; }
+                if out.len() >= limit {
+                    break;
+                }
             }
         }
     }
@@ -622,10 +638,9 @@ fn assemble_prompt(
 }
 
 pub fn load_previous_report(cwd: &Path) -> anyhow::Result<JsonReport> {
-    let path = find_report_in_ancestors(cwd).ok_or_else(|| anyhow::anyhow!(
-        "no report found under {} or its ancestors",
-        cwd.display()
-    ))?;
+    let path = find_report_in_ancestors(cwd).ok_or_else(|| {
+        anyhow::anyhow!("no report found under {} or its ancestors", cwd.display())
+    })?;
     let data = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
     let report: JsonReport =
         serde_json::from_slice(&data).with_context(|| format!("parse JSON {}", path.display()))?;
@@ -646,7 +661,9 @@ pub async fn save_report_atomic(cwd: &Path, report: &JsonReport) -> anyhow::Resu
 fn find_report_in_ancestors(cwd: &Path) -> Option<PathBuf> {
     for dir in cwd.ancestors() {
         let path = dir.join(".codex/review-codebase.json");
-        if path.exists() { return Some(path); }
+        if path.exists() {
+            return Some(path);
+        }
     }
     None
 }

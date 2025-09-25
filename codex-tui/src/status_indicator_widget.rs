@@ -160,7 +160,10 @@ impl WidgetRef for StatusIndicatorWidget {
 
         // Plain rendering: no borders or padding so the live cell is visually indistinguishable from terminal scrollback.
         let mut spans = vec![" ".repeat(LIVE_PREFIX_COLS as usize).into()];
-        spans.extend(crate::shimmer::shimmer_spans_tinted(&self.header, Color::Cyan));
+        spans.extend(crate::shimmer::shimmer_spans_tinted(
+            &self.header,
+            Color::Cyan,
+        ));
         spans.extend(vec![
             " ".into(),
             format!("({pretty_elapsed} • ").dim(),

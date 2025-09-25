@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand, Args, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use codex_core::config::ConfigOverrides as CoreConfigOverrides;
 use codex_core::protocol::AskForApproval;
 use codex_protocol::config_types::SandboxMode as SandboxModeCfg;
@@ -126,6 +126,8 @@ enum IndexCmd {
     Verify,
     /// Remove on-disk index
     Clean,
+    /// Manage ignore patterns used by the indexer (stored in .index-ignore at repo root)
+    Ignore(IndexIgnoreArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -171,6 +173,21 @@ struct IndexQueryArgs {
     diff: bool,
 }
 
+#[derive(Args, Debug, Clone)]
+struct IndexIgnoreArgs {
+    /// Add a pattern (glob-like: * and ? supported). Repeat to add multiple.
+    #[arg(long = "add")]
+    add: Vec<String>,
+    /// Remove a pattern. Repeat to remove multiple.
+    #[arg(long = "remove")]
+    remove: Vec<String>,
+    /// Reset to the default set and overwrite .index-ignore if it exists.
+    #[arg(long = "reset")]
+    reset: bool,
+    /// List the current patterns and the file path.
+    #[arg(long = "list")]
+    list: bool,
+}
 
 #[derive(Args, Debug, Clone)]
 struct SearchCodeArgs {
@@ -203,8 +220,6 @@ enum OutputFormatArg {
     Xml,
 }
 
-
-
 #[derive(Args, Debug, Clone)]
 struct ResumeArgs {
     /// Resume the most recent session
@@ -223,12 +238,32 @@ fn main() -> Result<()> {
 
     if let Some(cmd) = &cli.cmd {
         match cmd {
-            Cmd::SearchCode(SearchCodeArgs { query, k, show_snippets, output, no_line_numbers, line_number_width, diff }) => {
-                let args = IndexQueryArgs { query: query.to_string(), k: *k, show_snippets: *show_snippets, output: output.clone(), no_line_numbers: *no_line_numbers, line_number_width: *line_number_width, diff: *diff };
+            Cmd::SearchCode(SearchCodeArgs {
+                query,
+                k,
+                show_snippets,
+                output,
+                no_line_numbers,
+                line_number_width,
+                diff,
+            }) => {
+                let args = IndexQueryArgs {
+                    query: query.to_string(),
+                    k: *k,
+                    show_snippets: *show_snippets,
+                    output: output.clone(),
+                    no_line_numbers: *no_line_numbers,
+                    line_number_width: *line_number_width,
+                    diff: *diff,
+                };
                 return indexing::dispatch(IndexCmd::Query(args));
             }
 
-            Cmd::Resume(ResumeArgs { last, session_id, rest }) => {
+            Cmd::Resume(ResumeArgs {
+                last,
+                session_id,
+                rest,
+            }) => {
                 // Build an argv that the embedded CLI understands, preserving flags order.
                 let mut forwarded: Vec<OsString> = Vec::with_capacity(2 + rest.len());
                 forwarded.push(OsString::from("resume"));

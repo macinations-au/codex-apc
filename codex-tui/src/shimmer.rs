@@ -74,7 +74,6 @@ fn color_for_level(level: u8) -> Style {
     }
 }
 
-
 pub(crate) fn shimmer_spans_tinted(text: &str, tint: Color) -> Vec<Span<'static>> {
     let chars: Vec<char> = text.chars().collect();
     if chars.is_empty() {

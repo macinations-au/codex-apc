@@ -1,16 +1,20 @@
 use anyhow::{Context, Result, bail};
+use ignore::WalkBuilder;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use time::OffsetDateTime;
-use regex::Regex;
+
+// HNSW (approximate nearest neighbor) for fast query path
+use hnsw_rs::prelude::*;
 
 const INDEX_DIR: &str = ".codex/index";
 const IGNORE_FILE: &str = ".index-ignore";
-const VECTORS_FILE: &str = "vectors.hnsw"; // flat store for now
+const VECTORS_FILE: &str = "vectors.hnsw"; // flat vectors + ids (linear scan + id map for HNSW)
+const HNSW_BASENAME: &str = "vectors"; // will create vectors.hnsw.graph + vectors.hnsw.data // flat store for now
 const META_FILE: &str = "meta.jsonl";
 const MANIFEST_FILE: &str = "manifest.json";
 const ANALYTICS_FILE: &str = "analytics.json";
@@ -222,10 +226,19 @@ fn load_ignore_patterns() -> Vec<String> {
 fn save_ignore_patterns(mut pats: Vec<String>) -> anyhow::Result<()> {
     pats.sort();
     pats.dedup();
-    let body = pats.join("
-");
-    std::fs::write(ignore_file(), format!("{}
-", body)).context("write .index-ignore")
+    let body = pats.join(
+        "
+",
+    );
+    std::fs::write(
+        ignore_file(),
+        format!(
+            "{}
+",
+            body
+        ),
+    )
+    .context("write .index-ignore")
 }
 
 fn glob_to_regex(glob: &str) -> Regex {
@@ -272,18 +285,237 @@ fn build(args: &crate::IndexBuildArgs) -> Result<()> {
     ensure_dir()?;
     let _guard = match BuildLock::acquire() {
         Ok(g) => Some(g),
-        Err(_) => None,
+        Err(_) => None, // if concurrent, become a no-op quietly
     };
+
     // Record an attempt timestamp (manual or scheduled)
     let _ = update_analytics(|mut a| {
         a.last_attempt_ts = Some(now_iso());
         a
     });
-    // Quiet background refresh: do not print to stdout when called by the TUI/ACP.
-    // Future: perform git-delta build and update manifest.last_refresh here.
+
+    // Scan repository files (apply .index-ignore + sanity limits)
+    let root = repo_root();
+    let mut files: Vec<PathBuf> = Vec::new();
+    for dent in WalkBuilder::new(&root)
+        .hidden(true)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .max_depth(None)
+        .build()
+    {
+        let dent = match dent {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        let path = dent.path();
+        if !path.is_file() {
+            continue;
+        }
+        if should_skip(path) {
+            continue;
+        }
+        files.push(path.to_path_buf());
+    }
+
+    // Prepare embedding model
+    use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+    let model = match args.model.as_str() {
+        "bge-large" => EmbeddingModel::BGELargeENV15,
+        _ => EmbeddingModel::BGESmallENV15,
+    };
+    let opts = InitOptions::new(model);
+    let mut embedder = TextEmbedding::try_new(opts).context("init fastembed")?;
+
+    // Accumulate chunks, vectors (normalized), ids, and meta rows
+    let mut all_vecs: Vec<Vec<f32>> = Vec::new();
+    let mut all_ids: Vec<u64> = Vec::new();
+    let mut meta_rows: Vec<MetaRow> = Vec::new();
+    let mut next_id: u64 = 0;
+    let mut file_count: usize = 0;
+
+    for p in files.into_iter() {
+        let text = match read_text_if_textual(&p)? {
+            Some(t) => t,
+            None => continue,
+        };
+        file_count += 1;
+        let lang = language_for(&p);
+        let chunks = match args.chunk.as_str() {
+            "lines" => chunk_lines(&text, args.lines.max(8), args.overlap.min(args.lines / 2)),
+            _ => chunk_auto(
+                &text,
+                &p,
+                args.lines.max(80),
+                args.overlap.min(args.lines / 2),
+                &lang,
+            ),
+        };
+        let relp = rel(&root, &p);
+        for (s, e, prev) in chunks {
+            let chunk = &text[s..e];
+            // Embed (single item)
+            let v = embedder
+                .embed(vec![chunk.to_string()], None)
+                .context("embed chunk")?
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+            if v.is_empty() {
+                continue;
+            }
+            // Normalize vector (L2)
+            let mut vnorm = v;
+            let mut norm = 0f32;
+            for x in &vnorm {
+                norm += *x as f32 * *x as f32;
+            }
+            let norm = norm.sqrt();
+            if norm == 0.0 {
+                continue;
+            }
+            for x in vnorm.iter_mut() {
+                *x /= norm;
+            }
+
+            let id = next_id;
+            next_id += 1;
+            all_ids.push(id);
+            all_vecs.push(vnorm);
+            meta_rows.push(MetaRow {
+                id,
+                path: relp.clone(),
+                start: offset_to_line(&text, s),
+                end: offset_to_line(&text, e),
+                lang: lang.clone(),
+                sha256: sha256_hex(chunk),
+                preview: prev,
+            });
+        }
+    }
+
+    if all_vecs.is_empty() {
+        // Nothing to index; create minimal manifest and return Ok
+        let created = now_iso();
+        let m = Manifest {
+            index_version: 1,
+            engine: "fastembed+hnsw".into(),
+            model: args.model.clone(),
+            dim: 0,
+            metric: "cosine".into(),
+            chunk_mode: args.chunk.clone(),
+            chunk: ChunkCfg {
+                lines: args.lines,
+                overlap: args.overlap,
+            },
+            repo: RepoInfo {
+                root: root.to_string_lossy().into(),
+                git_sha: read_git_head_sha(),
+            },
+            counts: Counts {
+                files: file_count,
+                chunks: 0,
+            },
+            checksums: Checksums {
+                vectors_hnsw: String::new(),
+                meta_jsonl: String::new(),
+            },
+            created_at: created.clone(),
+            last_refresh: created,
+        };
+        fs::write(
+            idx_dir().join(MANIFEST_FILE),
+            serde_json::to_vec_pretty(&m)?,
+        )?;
+        return Ok(());
+    }
+
+    let dim = all_vecs[0].len();
+    // Flatten vectors for our mmap-friendly linear scan file (ids + contiguous f32)
+    let mut flat: Vec<f32> = Vec::with_capacity(dim * all_vecs.len());
+    for v in &all_vecs {
+        flat.extend_from_slice(&v[..]);
+    }
+
+    // Persist vectors + ids atomically
+    let vec_tmp = idx_dir().join(format!("{}.tmp", VECTORS_FILE));
+    write_vectors_file(&vec_tmp, dim as u32, &all_ids, &flat)?;
+    fs::rename(&vec_tmp, idx_dir().join(VECTORS_FILE))?;
+
+    // Persist meta.jsonl atomically
+    let meta_tmp = idx_dir().join(format!("{}.tmp", META_FILE));
+    {
+        let mut w = BufWriter::new(File::create(&meta_tmp)?);
+        for row in &meta_rows {
+            let line = serde_json::to_string(row)?;
+            w.write_all(line.as_bytes())?;
+            w.write_all(
+                b"
+",
+            )?;
+        }
+        w.flush()?;
+    }
+    fs::rename(&meta_tmp, idx_dir().join(META_FILE))?;
+
+    // Build and persist HNSW graph (prefer fast query path)
+    {
+        let max_points = all_vecs.len();
+        let m = 32usize; // max connections (M)
+        let ef_c = 200usize; // construction ef
+        let max_layer = 16usize;
+        let dist = DistCosine::default();
+        let hnsw: Hnsw<f32, DistCosine> = Hnsw::new(m, max_points, max_layer, ef_c, dist);
+        // Prepare slice of (&vec, id)
+        let items: Vec<(&[f32], usize)> = all_vecs
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (&v[..], i))
+            .collect();
+        hnsw.parallel_insert_slice(&items);
+        // Dump alongside other index files: vectors.hnsw.graph + vectors.hnsw.data
+        hnsw.file_dump(idx_dir().as_path(), HNSW_BASENAME)
+            .context("dump HNSW files")?;
+    }
+
+    // Compute checksums for manifest
+    let chk_vec = sha256_file(idx_dir().join(VECTORS_FILE))?;
+    let chk_meta = sha256_file(idx_dir().join(META_FILE))?;
+
+    let now = now_iso();
+    let manifest = Manifest {
+        index_version: 1,
+        engine: "fastembed+hnsw".into(),
+        model: args.model.clone(),
+        dim,
+        metric: "cosine".into(),
+        chunk_mode: args.chunk.clone(),
+        chunk: ChunkCfg {
+            lines: args.lines,
+            overlap: args.overlap,
+        },
+        repo: RepoInfo {
+            root: root.to_string_lossy().into(),
+            git_sha: read_git_head_sha(),
+        },
+        counts: Counts {
+            files: file_count,
+            chunks: all_ids.len(),
+        },
+        checksums: Checksums {
+            vectors_hnsw: chk_vec,
+            meta_jsonl: chk_meta,
+        },
+        created_at: now.clone(),
+        last_refresh: now.clone(),
+    };
+    let man_tmp = idx_dir().join(format!("{}.tmp", MANIFEST_FILE));
+    fs::write(&man_tmp, serde_json::to_vec_pretty(&manifest)?)?;
+    fs::rename(&man_tmp, idx_dir().join(MANIFEST_FILE))?;
+
     Ok(())
 }
-
 fn verify() -> Result<()> {
     let m: Manifest = serde_json::from_slice(&fs::read(idx_dir().join(MANIFEST_FILE))?)?;
     let vchk = sha256_file(idx_dir().join(VECTORS_FILE))?;
@@ -304,7 +536,6 @@ fn clean() -> Result<()> {
     Ok(())
 }
 
-
 fn ignore_cmd(args: &crate::IndexIgnoreArgs) -> anyhow::Result<()> {
     if args.reset {
         std::fs::write(ignore_file(), DEFAULT_IGNORE).context("write default .index-ignore")?;
@@ -321,15 +552,17 @@ fn ignore_cmd(args: &crate::IndexIgnoreArgs) -> anyhow::Result<()> {
         save_ignore_patterns(pats)?;
     }
     if args.list || (!args.reset && args.add.is_empty() && args.remove.is_empty()) {
-        print!("Ignore file: {}
-", ignore_file().display());
+        print!(
+            "Ignore file: {}
+",
+            ignore_file().display()
+        );
         for p in load_ignore_patterns() {
             println!("{p}");
         }
     }
     Ok(())
 }
-
 
 // ---------- helpers ----------
 
@@ -362,6 +595,23 @@ fn load_vectors(path: impl AsRef<Path>) -> Result<(Vec<u64>, Vec<f32>)> {
         data.push(v);
     }
     Ok((ids, data))
+}
+fn write_vectors_file(path: impl AsRef<Path>, dim: u32, ids: &[u64], data: &[f32]) -> Result<()> {
+    let mut w = BufWriter::new(File::create(path)?);
+    // magic + dim + rows + ids + data
+    w.write_all(b"VEC0")?;
+    w.write_all(&dim.to_le_bytes())?;
+    let rows = ids.len() as u64;
+    w.write_all(&rows.to_le_bytes())?;
+    for id in ids {
+        w.write_all(&id.to_le_bytes())?;
+    }
+    // write f32 little endian
+    for &v in data {
+        w.write_all(&v.to_le_bytes())?;
+    }
+    w.flush()?;
+    Ok(())
 }
 
 fn load_meta(path: impl AsRef<Path>) -> Result<std::collections::HashMap<u64, MetaRow>> {
@@ -688,6 +938,14 @@ fn update_analytics<F: FnOnce(Analytics) -> Analytics>(f: F) -> Result<()> {
     Ok(())
 }
 
+fn min_score_threshold() -> f32 {
+    std::env::var("CODEX_INDEX_RETRIEVAL_THRESHOLD")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok())
+        .map(|v| v.clamp(0.0, 1.0))
+        .unwrap_or(0.60)
+}
+
 fn xml_escape(s: &str) -> String {
     s.replace("&", "&amp;")
         .replace("<", "&lt;")
@@ -700,25 +958,95 @@ fn query(args: &crate::IndexQueryArgs) -> anyhow::Result<()> {
     let manifest: Manifest = serde_json::from_slice(&fs::read(idx_dir().join(MANIFEST_FILE))?)?;
     let (ids, data) = load_vectors(idx_dir().join(VECTORS_FILE))?;
     let meta = load_meta(idx_dir().join(META_FILE))?;
-    let qv = embed_text(&manifest.model, &args.query)?;
+
+    // Embed + normalize query
+    let mut qv = embed_text(&manifest.model, &args.query)?;
     if qv.len() != manifest.dim {
         bail!("query dim {} != index dim {}", qv.len(), manifest.dim);
     }
-    let k = args.k.min(ids.len());
-    let mut scores: Vec<(usize, f32)> = (0..ids.len())
-        .map(|i| {
-            (
-                i,
-                cosine(&qv, &data[i * manifest.dim..(i + 1) * manifest.dim]),
-            )
-        })
-        .collect();
+    let mut qn = 0f32;
+    for x in &qv {
+        qn += *x * *x;
+    }
+    let qn = qn.sqrt();
+    if qn > 0.0 {
+        for x in qv.iter_mut() {
+            *x /= qn;
+        }
+    }
+
+    // Prefer HNSW when files exist; fallback to linear scan
+    let graph_path = idx_dir().join(format!("{}.hnsw.graph", HNSW_BASENAME));
+    let data_path = idx_dir().join(format!("{}.hnsw.data", HNSW_BASENAME));
+    let use_hnsw = graph_path.exists() && data_path.exists();
+
+    let mut scores: Vec<(usize, f32)> = Vec::new();
+    if use_hnsw {
+        let mut reloader = HnswIo::new(idx_dir().as_path(), HNSW_BASENAME);
+        let options = hnsw_rs::prelude::ReloadOptions::default().set_mmap(true);
+        reloader.set_options(options);
+        let hnsw: Hnsw<f32, DistCosine> = reloader.load_hnsw::<f32, DistCosine>()?;
+        let ef_s = 256usize;
+        let max_k = args.k.min(ids.len());
+        let result = hnsw.search(&qv, max_k, ef_s);
+        for n in result.iter() {
+            // DistCosine distance in [0,2]; similarity ~ 1 - d
+            let sim = 1.0f32 - (n.distance as f32);
+            scores.push((n.d_id, sim)); // d_id is the insertion id (usize)
+        }
+    } else {
+        let k = args.k.min(ids.len());
+        scores = (0..ids.len())
+            .map(|i| {
+                (
+                    i,
+                    cosine(&qv, &data[i * manifest.dim..(i + 1) * manifest.dim]),
+                )
+            })
+            .collect();
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores.truncate(k);
+    }
+
+    // Sort scores (desc) to ensure top-first regardless of path
     scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Confidence gating: hide low-confidence results (< threshold)
+    let threshold = min_score_threshold();
+    let top = scores.first().map(|(_, s)| *s).unwrap_or(0.0);
+    if scores.is_empty() || top < threshold {
+        match args.output {
+            crate::OutputFormatArg::Text => {
+                println!("No information exists that matches the request.");
+            }
+            crate::OutputFormatArg::Json => {
+                println!("[]");
+            }
+            crate::OutputFormatArg::Xml => {
+                println!("<results/>");
+            }
+        }
+        update_analytics(|mut a| {
+            a.queries += 1;
+            let hit = if top >= threshold { 1 } else { 0 };
+            a.hits += hit;
+            a.misses = a.queries.saturating_sub(a.hits);
+            a.last_query_ts = Some(now_iso());
+            a
+        })?;
+        return Ok(());
+    }
+
     let mut out_items: Vec<serde_json::Value> = Vec::new();
+    let k = args.k.min(scores.len());
     for (rank, (i, score)) in scores.iter().take(k).enumerate() {
         let id = ids[*i];
         if let Some(row) = meta.get(&id) {
-            let snippet_lines = if args.show_snippets { Some(row.preview.lines().collect::<Vec<_>>()) } else { None };
+            let snippet_lines = if args.show_snippets {
+                Some(row.preview.lines().collect::<Vec<_>>())
+            } else {
+                None
+            };
             out_items.push(serde_json::json!({
                 "rank": rank,
                 "score": (*score as f64),
@@ -745,7 +1073,15 @@ fn query(args: &crate::IndexQueryArgs) -> anyhow::Result<()> {
                     let start_num = start as usize;
                     for (i, line) in snippet.iter().filter_map(|v| v.as_str()).enumerate() {
                         let prefix = if args.diff { "+ " } else { "" };
-                        if args.no_line_numbers { println!("{prefix}{line}"); } else { let ln = start_num.saturating_add(i); println!("{ln:>width$} | {prefix}{line}", width = args.line_number_width); }
+                        if args.no_line_numbers {
+                            println!("{prefix}{line}");
+                        } else {
+                            let ln = start_num.saturating_add(i);
+                            println!(
+                                "{ln:>width$} | {prefix}{line}",
+                                width = args.line_number_width
+                            );
+                        }
                     }
                     println!("---");
                 }
@@ -763,20 +1099,35 @@ fn query(args: &crate::IndexQueryArgs) -> anyhow::Result<()> {
                 let start = item["start"].as_u64().unwrap_or(0);
                 let end = item["end"].as_u64().unwrap_or(0);
                 let lang = xml_escape(item["lang"].as_str().unwrap_or(""));
-                println!(r#"  <hit rank="{rank}" score="{score:.3}" path="{path}" start="{start}" end="{end}" lang="{lang}">"#);
+                println!(
+                    r#"  <hit rank="{rank}" score="{score:.3}" path="{path}" start="{start}" end="{end}" lang="{lang}">"#
+                );
                 if let Some(snippet) = item["snippet"].as_array() {
                     println!("    <snippet>");
                     let start_num = start as usize;
                     for (i, line) in snippet.iter().filter_map(|v| v.as_str()).enumerate() {
                         let ln = start_num.saturating_add(i);
                         if args.no_line_numbers {
-                        if args.diff { println!("      <line op=\"add\">{}</line>", xml_escape(line)); } else { println!("      <line>{}</line>", xml_escape(line)); }
-                    } else {
-                        if args.diff { println!("      <line n=\"{ln}\" op=\"add\">{}</line>", xml_escape(line)); } else { println!("      <line n=\"{ln}\">{}</line>", xml_escape(line)); }
+                            if args.diff {
+                                println!(r#"      <line op="add">{}</line>"#, xml_escape(line));
+                            } else {
+                                println!(r#"      <line>{}</line>"#, xml_escape(line));
+                            }
+                        } else {
+                            if args.diff {
+                                println!(
+                                    r#"      <line n="{ln}" op="add">{}</line>"#,
+                                    xml_escape(line)
+                                );
+                            } else {
+                                println!(r#"      <line n="{ln}">{}</line>"#, xml_escape(line));
+                            }
+                        }
                     }
-                    }
-                    println!("    </snippet>
-  </hit>");
+                    println!(
+                        "    </snippet>
+  </hit>"
+                    );
                 } else {
                     println!("  </hit>");
                 }
@@ -786,7 +1137,8 @@ fn query(args: &crate::IndexQueryArgs) -> anyhow::Result<()> {
     }
     update_analytics(|mut a| {
         a.queries += 1;
-        let hit = if scores.get(0).map(|(_, s)| *s >= 0.25).unwrap_or(false) {
+        let threshold = min_score_threshold();
+        let hit = if scores.get(0).map(|(_, s)| *s >= threshold).unwrap_or(false) {
             1
         } else {
             0
@@ -798,7 +1150,6 @@ fn query(args: &crate::IndexQueryArgs) -> anyhow::Result<()> {
     })?;
     Ok(())
 }
-
 fn status() -> anyhow::Result<()> {
     let manifest_path = idx_dir().join(MANIFEST_FILE);
     if !manifest_path.exists() {
