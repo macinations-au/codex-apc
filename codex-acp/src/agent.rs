@@ -49,7 +49,9 @@ fn trigger_post_turn_index_refresh() {
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(300);
     let now = std::time::Instant::now();
-    let gate = LAST_RUN.get_or_init(|| Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(min_secs + 1)));
+    let gate = LAST_RUN.get_or_init(|| {
+        Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(min_secs + 1))
+    });
     if let Ok(mut last) = gate.lock() {
         if now.duration_since(*last).as_secs() < min_secs {
             return;
@@ -1155,13 +1157,10 @@ async fn fetch_retrieval_context(
     let threshold: f32 = std::env::var("CODEX_INDEX_RETRIEVAL_THRESHOLD")
         .ok()
         .and_then(|s| s.parse::<f32>().ok())
-        .unwrap_or(0.725);
+        .unwrap_or(0.65);
     // Compute quick stats and gate by threshold.
     let top = scores.first().map(|(_, s)| *s).unwrap_or(0.0);
-    let found = scores
-        .iter()
-        .take_while(|(_, s)| *s >= threshold)
-        .count();
+    let found = scores.iter().take_while(|(_, s)| *s >= threshold).count();
     if top < threshold {
         return None;
     }
