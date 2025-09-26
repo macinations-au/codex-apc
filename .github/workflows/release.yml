@@ -89,6 +89,7 @@ jobs:
           name: ${{ matrix.os }}-asset
           path: ${{ steps.pkg.outputs.asset }}
           if-no-files-found: error
+          retention-days: ${{ vars.ARTIFACT_RETENTION_DAYS || 14 }}
 
       - name: Upload build log
         if: always()
@@ -97,6 +98,7 @@ jobs:
           name: ${{ matrix.os }}-build-log
           path: release-build-*.log
           if-no-files-found: ignore
+          retention-days: ${{ vars.ARTIFACT_RETENTION_DAYS || 14 }}
 
   release:
     name: Publish Release
