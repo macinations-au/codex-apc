@@ -2,7 +2,7 @@
 name = "codex-acp"
 # authors field is optional for Cargo projects and not required for builds.
 # It has been removed to avoid outdated personal emails in manifests.
-version = "0.39.0-apc.7"
+version = "0.39.0-apc.9"
 edition = "2024"
 description = "ACP-compatible agent that bridges the OpenAI Codex runtime with ACP clients over stdio."
 readme = "README.md"
