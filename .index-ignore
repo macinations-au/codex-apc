@@ -1,0 +1,12 @@
+# Patterns ignored by the local code index (glob-like)
+# Hidden files/dirs
+.*
+# VCS / tooling / caches
+.git
+.codex
+.idea
+.vscode
+node_modules
+target
+dist
+build
