@@ -609,7 +609,7 @@ dependencies = [
 
 [[package]]
 name = "codex-acp"
-version = "0.39.0-apc.7"
+version = "0.39.0-apc.9"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
