@@ -106,3 +106,4 @@ jobs:
           name: ci-build-log-${{ matrix.os }}
           path: ci-build-*.log
           if-no-files-found: ignore
+          retention-days: ${{ vars.ARTIFACT_RETENTION_DAYS || 14 }}
