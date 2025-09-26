@@ -10,6 +10,15 @@ Scope
 - Match existing style and structure.
 - Prefer root‑cause fixes over band‑aids.
 - Ask before making destructive changes.
+### Context - Codebase - information indexed search **- MUST DO**
+- To aid in locating sources of code, a semantic search pre-result might be provided. You **MUST** use those results first before any other tools to find other places of concern or investigation in the code.
+- If no pre results or list of files are provided then you must also utilise the semantic search on the codebase index by running the following tool with a natural language request you will need to run this bash command `codex-agentic search-codebase <query prompt> -k 8 --show-snippets --output json`
+- or - To just locate the files in the codebase run `codex-agentic search-codebase <query prompt> --output json` : example : `codex-agentic search-code "where is santa clause ?" -k 8 --show-snippets  --diff`
+- use the search information to quickly find documents, code and information in the system quickly without grep'ing. use grep or other approved tools as a last resort.
+### Build and Install **- MUST DO**
+- Once the changes have been implemented, always perform the release build and ** install ** in the global cargo bin for the user to test
+
+
 
 ## Formatting (Markdown)
 - Always respond in valid Markdown.
@@ -137,3 +146,44 @@ ls -lh ~/.cargo/bin/codex-agentic codex-agentic/target/release/codex-agentic
 - Why: keeps the model aligned with the repo context without stalling the UI or starving other turns.
 - Markdown fixes: headings are sanitized to start on a new line; streaming also inserts a blank line before `#` if needed.
 - Avoid background readers in ACP: only one consumer should call `conversation.next_event()` at a time. Do not add background tasks that read conversation events.
+
+## Index‑First Code Navigation
+
+- When you need to locate code or files, use the local index first. Natural‑language search is often faster and more relevant than wildcard/pattern scans.
+- How to search quickly:
+
+```bash
+# In the TUI: type in the chat
+/search <what you’re looking for> [-k 8]
+
+# From a shell (CLI)
+codex-agentic index query "<natural language query>" -k 8 --show-snippets
+```
+
+- Fallback: if the index is missing, stale, or results are low confidence, use the standard approach (ripgrep/globs):
+
+```bash
+# Common ripgrep patterns (adjust globs as needed)
+rg -n --glob '!{target,node_modules,dist,build}' "ClassName|function_name|pattern" -S
+```
+
+- Index location: `.codex/index/` at the repo root (`manifest.json`, `vectors.hnsw`, `meta.jsonl`, `analytics.json`).
+
+## Local Install/Sync (for quick testing)
+
+To install the freshest local build into `~/.cargo/bin` and keep it in lockstep while developing:
+
+```bash
+# Build a release binary and sync to ~/.cargo/bin/codex-agentic
+(cd codex-agentic && cargo build --release)
+scripts/codex-agentic.sh --help >/dev/null 2>&1 || true  # syncs installed binary
+
+# Sanity checks
+which codex-agentic
+codex-agentic --version
+codex-agentic index status
+```
+
+Notes
+- The launcher script `scripts/codex-agentic.sh` always prefers the newest local binary (release/debug) and syncs it to `~/.cargo/bin/codex-agentic` for editor integrations.
+- Add `[skip ci]` to local commit messages when iterating to avoid triggering CI or Release workflows on pushes.

@@ -303,6 +303,19 @@ impl App {
             AppEvent::MemorizeReportIfNeeded(markdown) => {
                 self.chat_widget.memorize_report_if_needed(markdown);
             }
+            AppEvent::FooterNotice(text) => {
+                self.chat_widget
+                    .set_footer_notice(text, std::time::Duration::from_secs(60));
+            }
+            AppEvent::ClearFooterNotice => {
+                self.chat_widget.clear_footer_notice();
+            }
+            AppEvent::StartBackgroundAboutRefresh { prompt } => {
+                self.chat_widget.start_background_about_refresh(prompt);
+            }
+            AppEvent::EnableAboutSaveOnce => {
+                self.chat_widget.enable_about_save_once();
+            }
             AppEvent::ExitRequest => {
                 return Ok(false);
             }

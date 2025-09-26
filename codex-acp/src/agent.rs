@@ -27,11 +27,44 @@ use codex_core::{
 };
 use codex_protocol::mcp_protocol::ConversationId;
 use serde_json::json;
+use std::path::Path;
+use std::sync::OnceLock;
 use tokio::sync::{mpsc, oneshot, oneshot::Sender};
 use tokio::task;
 use tracing::{info, warn};
 
 mod commands;
+fn trigger_post_turn_index_refresh() {
+    // Respect global disable
+    if std::env::var("CODEX_INDEXING")
+        .map(|v| v == "0" || v.eq_ignore_ascii_case("off"))
+        .unwrap_or(false)
+    {
+        return;
+    }
+    use std::sync::{Mutex, OnceLock};
+    static LAST_RUN: OnceLock<Mutex<std::time::Instant>> = OnceLock::new();
+    let min_secs: u64 = std::env::var("CODEX_INDEX_REFRESH_MIN_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(300);
+    let now = std::time::Instant::now();
+    let gate = LAST_RUN.get_or_init(|| {
+        Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(min_secs + 1))
+    });
+    if let Ok(mut last) = gate.lock() {
+        if now.duration_since(*last).as_secs() < min_secs {
+            return;
+        }
+        *last = now;
+    }
+    std::thread::spawn(|| {
+        let _ = std::process::Command::new("codex-agentic")
+            .arg("index")
+            .arg("build")
+            .status();
+    });
+}
 // Placeholder for per-session state. Holds the Codex conversation
 // handle, its id (for status/reporting), and bookkeeping for streaming.
 #[derive(Clone)]
@@ -48,6 +81,7 @@ struct SessionState {
     current_model: String,
     current_effort: Option<ReasoningEffortConfig>,
     // Whether this session has already memorized the saved /about-codebase report.
+    #[allow(dead_code)]
     about_memorized: bool,
 }
 
@@ -263,7 +297,7 @@ impl Agent for CodexAgent {
             // Precompute strings before moving into the task to avoid borrowing self.
             let intro_header = format!(
                 "## Codex ACP\n- Version: `{}`\n\n",
-                env!("CARGO_PKG_VERSION")
+                env!("CARGO_PKG_VERSION"),
             );
             let status_string = self.render_status(&sid_str).await;
             task::spawn_local({
@@ -592,6 +626,16 @@ impl Agent for CodexAgent {
 
         // Build user input submission items from prompt content blocks.
         let mut items: Vec<InputItem> = Vec::new();
+        // Retrieval injection (local index) unless disabled
+        if !std::env::var("CODEX_INDEX_RETRIEVAL")
+            .map(|v| v == "0" || v.eq_ignore_ascii_case("off"))
+            .unwrap_or(false)
+            && let Some((ctx, _refs_md)) =
+                fetch_retrieval_context(&self.config.cwd, &args.prompt).await
+        {
+            items.push(InputItem::Text { text: ctx });
+        }
+
         for block in &args.prompt {
             match block {
                 ContentBlock::Text(t) => {
@@ -959,6 +1003,8 @@ impl Agent for CodexAgent {
                     }
                 }
                 EventMsg::TaskComplete(_) => {
+                    // Trigger a best‑effort post‑turn index refresh (git‑delta) if due.
+                    trigger_post_turn_index_refresh();
                     break;
                 }
                 EventMsg::Error(err) => {
@@ -1005,4 +1051,232 @@ impl Agent for CodexAgent {
         info!(method = %args.method, params = ?args.params, "Received extension notification call");
         Ok(())
     }
+}
+
+static EMBEDDER: OnceLock<std::sync::Mutex<fastembed::TextEmbedding>> = OnceLock::new();
+static RETRIEVAL_CACHE: OnceLock<std::sync::Mutex<lru::LruCache<String, (String, String)>>> =
+    OnceLock::new();
+
+fn token_budget() -> usize {
+    std::env::var("CODEX_INDEX_CONTEXT_TOKENS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(800)
+}
+
+fn est_tokens(s: &str) -> usize {
+    s.len().div_ceil(4)
+}
+
+async fn fetch_retrieval_context(
+    cwd: &Path,
+    blocks: &Vec<ContentBlock>,
+) -> Option<(String, String)> {
+    let mut q = String::new();
+    for b in blocks {
+        if let ContentBlock::Text(t) = b {
+            if !q.is_empty() {
+                q.push('\n');
+            }
+            q.push_str(&t.text);
+        }
+    }
+    if q.trim().is_empty() {
+        return None;
+    }
+    let q: String = q.chars().take(500).collect();
+    {
+        let init =
+            || std::sync::Mutex::new(lru::LruCache::new(std::num::NonZeroUsize::new(32).unwrap()));
+        let cache = RETRIEVAL_CACHE.get_or_init(init);
+        if let Ok(mut c) = cache.lock()
+            && let Some(v) = c.get(&q).cloned()
+        {
+            return Some(v);
+        }
+    }
+    // Read manifest
+    let base = cwd.join(".codex/index");
+    let manifest_path = if base.join("manifest.json").exists() {
+        base.join("manifest.json")
+    } else {
+        std::path::Path::new(".codex/index/manifest.json").to_path_buf()
+    };
+    let mbytes = std::fs::read(manifest_path).ok()?;
+    #[derive(serde::Deserialize)]
+    struct ManifestLite {
+        model: String,
+        dim: usize,
+    }
+    let m: ManifestLite = serde_json::from_slice(&mbytes).ok()?;
+    let model = match m.model.as_str() {
+        "bge-large-en-v1.5" => fastembed::EmbeddingModel::BGELargeENV15,
+        _ => fastembed::EmbeddingModel::BGESmallENV15,
+    };
+    {
+        {
+            let init = || {
+                std::sync::Mutex::new(
+                    fastembed::TextEmbedding::try_new(fastembed::InitOptions::new(model))
+                        .expect("fastembed init"),
+                )
+            };
+            EMBEDDER.get_or_init(init);
+        }
+    }
+    let mut qv = {
+        let mut guard = EMBEDDER.get().unwrap().lock().ok()?;
+        guard
+            .embed(vec![q.clone()], None)
+            .ok()?
+            .into_iter()
+            .next()?
+    };
+    if qv.len() != m.dim {
+        return None;
+    }
+    // normalize
+    let mut n = 0f32;
+    for &v in &qv {
+        n += v * v;
+    }
+    n = n.sqrt().max(1e-12);
+    for v in &mut qv {
+        *v /= n;
+    }
+    // Load vectors + meta
+    let vectors_path = if base.join("vectors.hnsw").exists() {
+        base.join("vectors.hnsw")
+    } else {
+        std::path::Path::new(".codex/index/vectors.hnsw").to_path_buf()
+    };
+    let (ids, data) = load_vectors_mmap(&vectors_path).ok()?;
+    let meta_path = if base.join("meta.jsonl").exists() {
+        base.join("meta.jsonl")
+    } else {
+        std::path::Path::new(".codex/index/meta.jsonl").to_path_buf()
+    };
+    let meta = load_meta_jsonl(&meta_path).ok()?;
+    let dim = m.dim;
+    use rayon::prelude::*;
+    let mut scores: Vec<(usize, f32)> = (0..ids.len())
+        .into_par_iter()
+        .map(|i| {
+            let base = i * dim;
+            let mut dot = 0f32;
+            for j in 0..dim {
+                dot += qv[j] * data[base + j];
+            }
+            (i, dot)
+        })
+        .collect();
+    scores.par_sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    // Threshold for context injection and display (default 0.725).
+    // If top score is below this, do not inject or display anything.
+    let threshold: f32 = std::env::var("CODEX_INDEX_RETRIEVAL_THRESHOLD")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(0.65);
+    // Compute quick stats and gate by threshold.
+    let top = scores.first().map(|(_, s)| *s).unwrap_or(0.0);
+    let found = scores.iter().take_while(|(_, s)| *s >= threshold).count();
+    if top < threshold {
+        return None;
+    }
+
+    // Build file reference list (no snippets) from top matches over threshold.
+    let mut refs: Vec<String> = Vec::new();
+    for (i, _score) in scores.into_iter().take_while(|(_, s)| *s >= threshold) {
+        let id = ids[i];
+        if let Some(r) = meta.get(&id) {
+            refs.push(format!("- @{}:{}-{} ({})", r.path, r.start, r.end, r.lang));
+        }
+    }
+    let header = concat!(
+        "Local code references — read these first.\n\n",
+        "Instructions:\n",
+        "1) Treat the files below as the primary sources for answering. Read them carefully before any grep/other searches.\n",
+        "2) Only if these sources are insufficient, you may run additional searches.\n",
+        "3) Do not include low-confidence references (< threshold) in your reasoning.\n",
+        "4) Cite file paths and line ranges when you reference code.\n\n",
+        "References:\n",
+    ).to_string();
+    let mut ctx = header.clone();
+    let budget = token_budget();
+    for line in refs {
+        if est_tokens(&(ctx.clone() + &line)) > budget {
+            break;
+        }
+        ctx.push_str(&line);
+        ctx.push('\n');
+    }
+    let cf_pct = (top * 100.0).round();
+    let summary = format!("> {:.0}% -- {} items found", cf_pct, found);
+    {
+        let out = (ctx.clone(), summary.clone());
+        if let Ok(mut c) = RETRIEVAL_CACHE.get().unwrap().lock() {
+            c.put(q.clone(), out.clone());
+        }
+        Some(out)
+    }
+}
+fn load_vectors_mmap(p: &Path) -> Result<(Vec<u64>, Vec<f32>), ()> {
+    use memmap2::MmapOptions;
+    use std::fs::File;
+    use std::io::Read;
+    let f = File::open(p).map_err(|_| ())?;
+    let mut r = std::io::BufReader::new(f);
+    let mut b4 = [0u8; 4];
+    let mut b8 = [0u8; 8];
+    r.read_exact(&mut b4).map_err(|_| ())?;
+    r.read_exact(&mut b4).map_err(|_| ())?;
+    let dim = u32::from_le_bytes(b4) as usize;
+    r.read_exact(&mut b8).map_err(|_| ())?;
+    let rows = u64::from_le_bytes(b8) as usize;
+    let mut ids = Vec::with_capacity(rows);
+    for _ in 0..rows {
+        r.read_exact(&mut b8).map_err(|_| ())?;
+        ids.push(u64::from_le_bytes(b8));
+    }
+    let f2 = r.into_inner();
+    let mmap = unsafe { MmapOptions::new().map(&f2).map_err(|_| ())? };
+    let start = 4 + 4 + 8 + rows * 8;
+    let bytes = &mmap[start..start + rows * dim * 4];
+    let mut data = Vec::with_capacity(rows * dim);
+    let mut i = 0usize;
+    while i < bytes.len() {
+        data.push(f32::from_le_bytes([
+            bytes[i],
+            bytes[i + 1],
+            bytes[i + 2],
+            bytes[i + 3],
+        ]));
+        i += 4;
+    }
+    Ok((ids, data))
+}
+#[derive(serde::Deserialize)]
+struct MetaLite {
+    id: u64,
+    path: String,
+    start: usize,
+    end: usize,
+    lang: String,
+    #[allow(dead_code)]
+    preview: String,
+}
+fn load_meta_jsonl(p: &Path) -> Result<std::collections::HashMap<u64, MetaLite>, ()> {
+    use std::fs::File;
+    use std::io::BufRead;
+    let f = std::io::BufReader::new(File::open(p).map_err(|_| ())?);
+    let mut map = std::collections::HashMap::new();
+    for line in f.lines() {
+        let l = line.map_err(|_| ())?;
+        if l.trim().is_empty() {
+            continue;
+        }
+        let r: MetaLite = serde_json::from_str(&l).map_err(|_| ())?;
+        map.insert(r.id, r);
+    }
+    Ok(map)
 }

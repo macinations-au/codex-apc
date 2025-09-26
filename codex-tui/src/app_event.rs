@@ -75,5 +75,17 @@ pub(crate) enum AppEvent {
     /// Internal: ask ChatWidget to submit a one-off memorize turn for the
     /// current session using the provided report markdown. If already
     /// memorized in this session, it is a no-op.
+    #[allow(dead_code)]
     MemorizeReportIfNeeded(String),
+    /// Show a short-lived notice in the footer (e.g., background tasks).
+    FooterNotice(String),
+    ClearFooterNotice,
+    /// Start a background rebuild of the codebase report without streaming into chat.
+    StartBackgroundAboutRefresh {
+        prompt: String,
+    },
+
+    /// Enable saving the next assistant message as the /about-codebase report.
+    /// Used by the review_codebase flow to persist the initial foreground build.
+    EnableAboutSaveOnce,
 }

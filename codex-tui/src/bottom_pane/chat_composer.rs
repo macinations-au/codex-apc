@@ -78,6 +78,8 @@ pub(crate) struct ChatComposer {
     current_file_query: Option<String>,
     pending_pastes: Vec<(String, String)>,
     token_usage_info: Option<TokenUsageInfo>,
+    index_status: Option<String>,
+    index_last_updated: Option<String>,
     has_focus: bool,
     attached_images: Vec<AttachedImage>,
     placeholder_text: String,
@@ -123,6 +125,8 @@ impl ChatComposer {
             current_file_query: None,
             pending_pastes: Vec::new(),
             token_usage_info: None,
+            index_status: None,
+            index_last_updated: None,
             has_focus: has_input_focus,
             attached_images: Vec::new(),
             placeholder_text,
@@ -138,10 +142,16 @@ impl ChatComposer {
 
     pub fn desired_height(&self, width: u16) -> u16 {
         // Leave 1 column for the left border and 1 column for left padding
+        let hint_lines = if self.index_last_updated.is_some() || self.index_status.is_some() {
+            2
+        } else {
+            1
+        };
+        let footer_height_with_hint = hint_lines + FOOTER_SPACING_HEIGHT;
         self.textarea
             .desired_height(width.saturating_sub(LIVE_PREFIX_COLS))
             + match &self.active_popup {
-                ActivePopup::None => FOOTER_HEIGHT_WITH_HINT,
+                ActivePopup::None => footer_height_with_hint,
                 ActivePopup::Command(c) => c.calculate_required_height(width),
                 ActivePopup::File(c) => c.calculate_required_height(),
             }
@@ -175,6 +185,16 @@ impl ChatComposer {
     /// context when the composer is empty.
     pub(crate) fn set_token_usage(&mut self, token_info: Option<TokenUsageInfo>) {
         self.token_usage_info = token_info;
+    }
+
+    /// Set/clear the compact index status shown in the footer hint row.
+    pub(crate) fn set_index_status(&mut self, status: Option<String>) {
+        self.index_status = status;
+    }
+
+    /// Set/clear the persistent last-updated status for the index.
+    pub(crate) fn set_index_last_updated(&mut self, status: Option<String>) {
+        self.index_last_updated = status;
     }
 
     /// Record the history metadata advertised by `SessionConfiguredEvent` so
@@ -1252,10 +1272,17 @@ impl WidgetRef for ChatComposer {
                 0,
             ),
             ActivePopup::File(popup) => (Constraint::Max(popup.calculate_required_height()), 0),
-            ActivePopup::None => (
-                Constraint::Length(FOOTER_HEIGHT_WITH_HINT),
-                FOOTER_SPACING_HEIGHT,
-            ),
+            ActivePopup::None => {
+                let hint_lines = if self.index_last_updated.is_some() {
+                    2
+                } else {
+                    1
+                };
+                (
+                    Constraint::Length(hint_lines + FOOTER_SPACING_HEIGHT),
+                    FOOTER_SPACING_HEIGHT,
+                )
+            }
         };
         let [textarea_rect, popup_rect] =
             Layout::vertical([Constraint::Min(1), popup_constraint]).areas(area);
@@ -1270,7 +1297,11 @@ impl WidgetRef for ChatComposer {
                 let hint_rect = if hint_spacing > 0 {
                     let [_, hint_rect] = Layout::vertical([
                         Constraint::Length(hint_spacing),
-                        Constraint::Length(FOOTER_HINT_HEIGHT),
+                        Constraint::Length(if self.index_last_updated.is_some() {
+                            2
+                        } else {
+                            1
+                        }),
                     ])
                     .areas(popup_rect);
                     hint_rect
@@ -1344,9 +1375,32 @@ impl WidgetRef for ChatComposer {
                     }
                 }
 
-                Line::from(hint)
-                    .style(Style::default().dim())
-                    .render_ref(hint_rect, buf);
+                // Split footer hints area into one or two rows.
+                if self.index_last_updated.is_some() || self.index_status.is_some() {
+                    let [row1, row2] =
+                        Layout::vertical([Constraint::Length(1), Constraint::Length(1)])
+                            .areas(hint_rect);
+                    Line::from(hint)
+                        .style(Style::default().dim())
+                        .render_ref(row1, buf);
+                    let mut line2 = String::new();
+                    if let Some(ref updated) = self.index_last_updated {
+                        line2.push_str(updated);
+                    }
+                    if let Some(ref idx) = self.index_status {
+                        if !line2.is_empty() {
+                            line2.push_str("   ");
+                        }
+                        line2.push_str(idx);
+                    }
+                    Line::from(line2)
+                        .style(Style::default().fg(Color::Cyan))
+                        .render_ref(row2, buf);
+                } else {
+                    Line::from(hint)
+                        .style(Style::default().dim())
+                        .render_ref(hint_rect, buf);
+                }
             }
         }
         let border_style = if self.has_focus {

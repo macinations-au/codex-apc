@@ -341,6 +341,7 @@ fn make_chatwidget_manual() -> (
         pending_about_save: false,
         about_memorized_in_session: false,
         background_memorize_active: false,
+        background_about_rebuild_active: false,
     };
     (widget, rx, op_rx)
 }

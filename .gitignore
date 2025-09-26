@@ -34,3 +34,7 @@ logs/
 # Nix
 result
 *.drv
+
+.fastembed_cache/
+codex-agentic/.fastembed_cache/
+.codex/

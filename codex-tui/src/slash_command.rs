@@ -25,6 +25,10 @@ pub enum SlashCommand {
     Status,
     Limits,
     Mcp,
+    /// Manage local index (status/build/verify/clean) — mirrors ACP
+    Index,
+    /// Semantic search in local codebase — mirrors ACP
+    Search,
     Logout,
     Quit,
     #[cfg(debug_assertions)]
@@ -50,6 +54,10 @@ impl SlashCommand {
             SlashCommand::Model => "choose what model and reasoning effort to use",
             SlashCommand::Approvals => "choose what Codex can do without approval",
             SlashCommand::Mcp => "list configured MCP tools",
+            SlashCommand::Index => {
+                "manage local index: /index status | build [--model bge-small|bge-large] [--force] | verify | clean"
+            }
+            SlashCommand::Search => "semantic search in codebase (local): /search <query> [-k N]",
             SlashCommand::Reasoning => "show/hide thinking: hidden | summary | raw",
             SlashCommand::Logout => "log out of Codex",
             #[cfg(debug_assertions)]
@@ -80,6 +88,8 @@ impl SlashCommand {
             | SlashCommand::Status
             | SlashCommand::Limits
             | SlashCommand::Mcp
+            | SlashCommand::Index
+            | SlashCommand::Search
             | SlashCommand::Quit => true,
 
             #[cfg(debug_assertions)]

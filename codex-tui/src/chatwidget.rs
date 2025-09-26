@@ -52,6 +52,7 @@ use ratatui::layout::Layout;
 use ratatui::layout::Rect;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
+use std::process::Command as StdCommand;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::debug;
 
@@ -194,6 +195,9 @@ pub(crate) struct ChatWidget {
     // Background memorize turn state: when true, we suppress normal streaming
     // and avoid setting the UI into task-running mode.
     background_memorize_active: bool,
+    // Background about-codebase rebuild state: suppress streaming; save output
+    // to the report JSON and show a footer notice when done.
+    background_about_rebuild_active: bool,
 }
 
 struct UserMessage {
@@ -239,6 +243,33 @@ impl ChatWidget {
             items: vec![InputItem::Text { text: mem_prompt }],
         }));
     }
+
+    pub(crate) fn start_background_about_refresh(&mut self, prompt: String) {
+        // Suppress transcript streaming and persist the final message to the report JSON.
+        self.background_memorize_active = false; // ensure only one quiet mode is active
+        self.background_about_rebuild_active = true;
+        self.pending_about_save = true;
+        self.app_event_tx.send(AppEvent::CodexOp(Op::UserInput {
+            items: vec![InputItem::Text { text: prompt }],
+        }));
+    }
+
+    pub(crate) fn enable_about_save_once(&mut self) {
+        self.pending_about_save = true;
+    }
+
+    pub(crate) fn set_footer_notice(&mut self, text: String, duration: std::time::Duration) {
+        self.bottom_pane.set_index_status(Some(text));
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(duration).await;
+            tx.send(AppEvent::ClearFooterNotice);
+        });
+    }
+
+    pub(crate) fn clear_footer_notice(&mut self) {
+        self.bottom_pane.set_index_status(None);
+    }
     // --- Small event handlers ---
     fn on_session_configured(&mut self, event: codex_core::protocol::SessionConfiguredEvent) {
         self.bottom_pane
@@ -260,25 +291,17 @@ impl ChatWidget {
         if let Some(user_message) = self.initial_user_message.take() {
             self.submit_user_message(user_message);
         }
-        // Daisy-chain AGENTS.md read with codebase report memorization once per session.
-        // If a saved report exists, submit a memorize turn now so /about-codebase later just displays.
-        if !self.about_memorized_in_session {
-            let cwd = self.config.cwd.clone();
-            if let Ok(rep) = crate::review_codebase::load_previous_report(&cwd)
-                && !rep.report.markdown.trim().is_empty()
-            {
-                let sanitized =
-                    crate::review_codebase::sanitize_markdown_headings(&rep.report.markdown);
-                self.memorize_report_if_needed(sanitized);
-            }
-        }
+        // Optional: memorize saved report once per session if enabled.
+        // No automatic memorize on session start; memorization will be triggered after refresh.
         if !self.suppress_session_configured_redraw {
             self.request_redraw();
         }
+        // Update footer with index last-updated status on session start.
+        self.refresh_index_last_updated_footer();
     }
 
     fn on_agent_message(&mut self, message: String) {
-        if self.background_memorize_active {
+        if self.background_memorize_active || self.background_about_rebuild_active {
             // Suppress transcript rendering for background memorize.
             return;
         }
@@ -289,7 +312,7 @@ impl ChatWidget {
     }
 
     fn on_agent_message_delta(&mut self, delta: String) {
-        if self.background_memorize_active {
+        if self.background_memorize_active || self.background_about_rebuild_active {
             // Suppress streaming for background memorize.
             return;
         }
@@ -391,16 +414,30 @@ impl ChatWidget {
             self.pending_about_save = false;
         }
 
-        // Show a compact acknowledgement for background memorize turns and clear the flag.
+        // Show an acknowledgement for background memorize or background report rebuild.
         if self.background_memorize_active {
             if let Some(ref text) = last_agent_message {
                 let ack = text.trim();
                 if !ack.is_empty() {
-                    self.add_to_history(history_cell::new_review_status_line(ack.to_string()))
+                    self.set_footer_notice(ack.to_string(), std::time::Duration::from_secs(60));
                 }
             }
             self.background_memorize_active = false;
         }
+
+        if self.background_about_rebuild_active {
+            // We already saved the report via pending_about_save branch; just notify.
+            self.set_footer_notice(
+                "Codebase report ready".to_string(),
+                std::time::Duration::from_secs(60),
+            );
+            self.background_about_rebuild_active = false;
+        }
+
+        // Trigger a best-effort post-turn index refresh (git-delta) if due.
+        maybe_trigger_post_turn_index_refresh();
+        // Refresh the footer's index last-updated status after each turn.
+        self.refresh_index_last_updated_footer();
     }
 
     pub(crate) fn set_token_info(&mut self, info: Option<TokenUsageInfo>) {
@@ -858,6 +895,7 @@ impl ChatWidget {
             pending_about_save: false,
             about_memorized_in_session: false,
             background_memorize_active: false,
+            background_about_rebuild_active: false,
         }
     }
 
@@ -920,6 +958,7 @@ impl ChatWidget {
             pending_about_save: false,
             about_memorized_in_session: false,
             background_memorize_active: false,
+            background_about_rebuild_active: false,
         }
     }
 
@@ -1005,6 +1044,60 @@ impl ChatWidget {
                                 .await;
                             });
                             return; // Do not submit as a normal user message
+                        } else if let Some(rest) = trimmed.strip_prefix("/index") {
+                            let args_text = rest.trim();
+                            let mut args: Vec<String> = vec!["index".into()];
+                            if args_text.is_empty() {
+                                args.push("status".into());
+                            } else if let Some(tokens) = shlex::split(args_text) {
+                                args.extend(tokens);
+                            }
+                            let cfg = self.config.clone();
+                            let tx = self.app_event_tx.clone();
+                            tokio::spawn(async move {
+                                let out =
+                                    crate::review_codebase::run_local_cli_capture(&cfg.cwd, args);
+                                let msg = format!("```text\n{}\n```", out);
+                                let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                                crate::markdown::append_markdown(&msg, &mut lines, &cfg);
+                                let cell = history_cell::AgentMessageCell::new(lines, true);
+                                tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
+                            });
+                            return;
+                        } else if let Some(rest) = trimmed.strip_prefix("/search") {
+                            let query = rest.trim();
+                            if query.is_empty() {
+                                self.add_to_history(history_cell::new_error_event(
+                                    "Usage: /search <query> [-k N]".to_string(),
+                                ));
+                                return;
+                            }
+                            let args = {
+                                // Note: do not shlex the query — pass as a single argument
+                                let mut v = vec![
+                                    "index".to_string(),
+                                    "query".to_string(),
+                                    query.to_string(),
+                                ];
+                                if !query.contains("-k ") {
+                                    v.push("-k".into());
+                                    v.push("8".into());
+                                }
+                                v.push("--show-snippets".into());
+                                v
+                            };
+                            let cfg = self.config.clone();
+                            let tx = self.app_event_tx.clone();
+                            tokio::spawn(async move {
+                                let out =
+                                    crate::review_codebase::run_local_cli_capture(&cfg.cwd, args);
+                                let msg = format!("```text\n{}\n```", out);
+                                let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                                crate::markdown::append_markdown(&msg, &mut lines, &cfg);
+                                let cell = history_cell::AgentMessageCell::new(lines, true);
+                                tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
+                            });
+                            return;
                         }
                         // If a task is running, queue the user input to be sent after the turn completes.
                         let user_message = UserMessage {
@@ -1127,6 +1220,27 @@ impl ChatWidget {
             SlashCommand::Status => {
                 self.add_status_output();
             }
+            SlashCommand::Index => {
+                let cfg = self.config.clone();
+                let tx = self.app_event_tx.clone();
+                tokio::spawn(async move {
+                    let out = crate::review_codebase::run_local_cli_capture(
+                        &cfg.cwd,
+                        vec!["index".into(), "status".into()],
+                    );
+                    let msg = format!("```text\n{}\n```", out);
+                    let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                    crate::markdown::append_markdown(&msg, &mut lines, &cfg);
+                    let cell = history_cell::AgentMessageCell::new(lines, true);
+                    tx.send(AppEvent::InsertHistoryCell(Box::new(cell)));
+                });
+            }
+            SlashCommand::Search => {
+                self.add_to_history(history_cell::new_info_event(
+                    "Usage: /search <query> [-k N]".to_string(),
+                    None,
+                ));
+            }
             SlashCommand::Limits => {
                 self.add_limits_output();
             }
@@ -1219,6 +1333,21 @@ impl ChatWidget {
         let UserMessage { text, image_paths } = user_message;
         let mut items: Vec<InputItem> = Vec::new();
 
+        // Retrieval injection (local index) unless disabled
+        if !std::env::var("CODEX_INDEX_RETRIEVAL")
+            .map(|v| v == "0" || v.eq_ignore_ascii_case("off"))
+            .unwrap_or(false)
+        {
+            if let Some((ctx, summary)) = fetch_retrieval_context_plus(&text) {
+                // Display compact index status in the footer (not in the chat history).
+                self.bottom_pane.set_index_status(Some(summary));
+                // Inject the detailed context into the model input.
+                items.push(InputItem::Text { text: ctx });
+            } else {
+                // Clear any previous index status if we didn't use retrieval.
+                self.bottom_pane.set_index_status(None);
+            }
+        }
         if !text.is_empty() {
             items.push(InputItem::Text { text: text.clone() });
         }
@@ -1236,6 +1365,9 @@ impl ChatWidget {
             .unwrap_or_else(|e| {
                 tracing::error!("failed to send message: {e}");
             });
+
+        // Refresh footer index age immediately on new input to keep it visible.
+        self.refresh_index_last_updated_footer();
 
         // Persist the text to cross-session message history.
         if !text.is_empty() {
@@ -1980,3 +2112,293 @@ fn extract_first_bold(s: &str) -> Option<String> {
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+#[allow(dead_code)]
+fn token_budget_env() -> usize {
+    std::env::var("CODEX_INDEX_CONTEXT_TOKENS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(800)
+}
+#[allow(dead_code)]
+fn est_tokens(s: &str) -> usize {
+    s.len().div_ceil(4)
+}
+
+#[allow(dead_code)]
+fn fetch_retrieval_context(query: &str) -> Option<String> {
+    if query.trim().is_empty() {
+        return None;
+    }
+    // best-effort call to codex-agentic index query
+    let out = StdCommand::new("codex-agentic")
+        .arg("index")
+        .arg("query")
+        .arg(query)
+        .arg("-k")
+        .arg("8")
+        .arg("--show-snippets")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).to_string();
+    if s.trim().is_empty() {
+        return None;
+    }
+    // Token-aware trim
+    let budget = token_budget_env();
+    let mut acc = String::new();
+    for line in s.lines() {
+        if est_tokens(&(acc.clone() + line)) > budget {
+            break;
+        }
+        acc.push_str(line);
+        acc.push('\n');
+    }
+    Some(format!(
+        concat!(
+            "Context (top matches from local code index) — read these first:\n\n",
+            "```text\n{}\n```\n\n",
+            "Instructions:\n",
+            "1) Treat the above files as the primary sources for answering. Read them carefully before any grep/other searches.\n",
+            "2) Only if these sources are insufficient, you may run additional searches.\n",
+            "3) Do not include low-confidence references (< threshold) in your reasoning.\n",
+            "4) Cite file paths and line ranges when you reference code.\n"
+        ),
+        acc
+    ))
+}
+
+/// Fetch retrieval context plus a compact references list for UI display.
+/// Returns (context_block_for_llm, references_markdown_for_ui).
+fn fetch_retrieval_context_plus(query: &str) -> Option<(String, String)> {
+    if query.trim().is_empty() {
+        return None;
+    }
+    // best-effort call to codex-agentic index query
+    let out = StdCommand::new("codex-agentic")
+        .arg("index")
+        .arg("query")
+        .arg(query)
+        .arg("-k")
+        .arg("8")
+        .arg("--show-snippets")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).to_string();
+    if s.trim().is_empty() {
+        return None;
+    }
+    // Determine top confidence and count of items over threshold from header lines
+    let mut top_score: Option<f32> = None;
+    let mut found: usize = 0;
+    let threshold: f32 = std::env::var("CODEX_INDEX_RETRIEVAL_THRESHOLD")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.65);
+    for line in s.lines() {
+        let l = line.trim();
+        if !l.starts_with('[') {
+            continue;
+        }
+        // expected: "[rank] <score> <path>:<start>-<end> (<lang>)"
+        // parse score token after the first closing bracket
+        if let Some(pos) = l.find(']') {
+            let after = l[(pos + 1)..].trim();
+            if let Some(score_tok) = after.split_whitespace().next()
+                && let Ok(sc) = score_tok.parse::<f32>()
+            {
+                if top_score.is_none() {
+                    top_score = Some(sc);
+                }
+                if sc >= threshold {
+                    found += 1;
+                }
+            }
+        }
+    }
+    let top = top_score.unwrap_or(0.0);
+    if top < threshold {
+        // Below confidence threshold: do not inject or display anything.
+        return None;
+    }
+    // Build file references list from header lines only
+    let mut refs: Vec<String> = Vec::new();
+    for line in s.lines() {
+        let l = line.trim();
+        if !l.starts_with("[") {
+            continue;
+        }
+        if let Some(pos) = l.find("]") {
+            let after = l[(pos + 1)..].trim();
+            let mut it = after.split_whitespace();
+            let score_tok = it.next();
+            let path_tok = it.next();
+            if let (Some(st), Some(pt)) = (score_tok, path_tok)
+                && let Ok(sc) = st.parse::<f32>()
+                && sc >= threshold
+            {
+                let (path, rng) = pt.split_once(":").unwrap_or((pt, ""));
+                refs.push(format!("- @{} {}", path, rng));
+            }
+        }
+    }
+    let refs_block = refs.join("\n");
+    let ctx = format!(
+        concat!(
+            "Local code references — read these first.\n\n",
+            "Instructions:\n",
+            "1) Treat the files below as the primary sources for answering. Read them carefully before any grep/other searches.\n",
+            "2) Only if these sources are insufficient, you may run additional searches.\n",
+            "3) Do not include low-confidence references (< threshold) in your reasoning.\n",
+            "4) Cite file paths and line ranges when you reference code.\n\n",
+            "References:\n",
+            "{}\n"
+        ),
+        refs_block
+    );
+    // Compact UI summary: show highest confidence as percent and number of items found
+    let cf_pct = (top * 100.0).round();
+    let summary_md = format!("> {:.0}% -- {} items found", cf_pct, found);
+    Some((ctx, summary_md))
+}
+
+fn compute_relative_age(iso: &str) -> Option<String> {
+    use chrono::{DateTime, Utc};
+    let dt = DateTime::parse_from_rfc3339(iso).ok()?.with_timezone(&Utc);
+    let now = Utc::now();
+    let secs = (now - dt).num_seconds();
+    Some(if secs < 60 {
+        "now".to_string()
+    } else if secs < 3600 {
+        format!("{} min ago", secs / 60)
+    } else if secs < 86400 {
+        let h = secs / 3600;
+        format!("{} hr{} ago", h, if h == 1 { "" } else { "s" })
+    } else if secs < 86400 * 7 {
+        let d = secs / 86400;
+        format!("{} day{} ago", d, if d == 1 { "" } else { "s" })
+    } else if secs < 86400 * 30 {
+        let w = secs / (86400 * 7);
+        format!("{} week{} ago", w, if w == 1 { "" } else { "s" })
+    } else {
+        let m = secs / (86400 * 30);
+        format!("{} month{} ago", m, if m == 1 { "" } else { "s" })
+    })
+}
+
+impl ChatWidget {
+    fn refresh_index_last_updated_footer(&mut self) {
+        use std::fs;
+        use std::path::PathBuf;
+        // Try CWD-based location first, then local process directory.
+        let mut p = self.config.cwd.clone().join(".codex/index/manifest.json");
+        if !p.exists() {
+            let alt = PathBuf::from(".codex/index/manifest.json");
+            if alt.exists() {
+                p = alt;
+            }
+        }
+        let text = match fs::read_to_string(&p) {
+            Ok(s) => s,
+            Err(_) => {
+                // Fallback: call CLI `index status` and parse relative age.
+                if let Ok(out) = StdCommand::new("codex-agentic")
+                    .arg("index")
+                    .arg("status")
+                    .output()
+                    && out.status.success()
+                {
+                    let s = String::from_utf8_lossy(&out.stdout);
+                    if let Some(line) = s
+                        .lines()
+                        .find(|l| l.trim_start().starts_with("Last indexed:"))
+                    {
+                        let rel = line.trim_start().trim_start_matches("Last indexed:").trim();
+                        if !rel.is_empty() {
+                            self.bottom_pane
+                                .set_index_last_updated(Some(format!("Indexed {}", rel)));
+                            return;
+                        }
+                    }
+                }
+                self.bottom_pane.set_index_last_updated(None);
+                return;
+            }
+        };
+        let last = match serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| {
+                v.get("last_refresh")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string())
+            }) {
+            Some(s) => s,
+            None => {
+                self.bottom_pane.set_index_last_updated(None);
+                return;
+            }
+        };
+        let idx_rel = compute_relative_age(&last);
+        // Also attempt to read analytics.json for last_attempt_ts
+        let mut attempt_rel: Option<String> = None;
+        let ap = p
+            .parent()
+            .map(|d| d.join("analytics.json"))
+            .unwrap_or_else(|| PathBuf::from(".codex/index/analytics.json"));
+        if let Ok(at) = std::fs::read_to_string(&ap)
+            && let Ok(val) = serde_json::from_str::<serde_json::Value>(&at)
+            && let Some(ts) = val.get("last_attempt_ts").and_then(|x| x.as_str())
+        {
+            attempt_rel = compute_relative_age(ts);
+        }
+        let line = match (idx_rel, attempt_rel) {
+            (Some(i), Some(a)) => format!("Indexed {} • Checked {}", i, a),
+            (Some(i), None) => format!("Indexed {}", i),
+            (None, Some(a)) => format!("Checked {}", a),
+            _ => String::new(),
+        };
+        if line.is_empty() {
+            self.bottom_pane.set_index_last_updated(None);
+        } else {
+            self.bottom_pane.set_index_last_updated(Some(line));
+        }
+    }
+}
+// --- Post‑turn index refresh trigger (non‑blocking) ---
+fn maybe_trigger_post_turn_index_refresh() {
+    use std::sync::{Mutex, OnceLock};
+    static LAST_RUN: OnceLock<Mutex<std::time::Instant>> = OnceLock::new();
+    let min_secs: u64 = std::env::var("CODEX_INDEX_REFRESH_MIN_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(300); // 5 minutes default
+    if std::env::var("CODEX_INDEXING")
+        .map(|v| v == "0" || v.eq_ignore_ascii_case("off"))
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let now = std::time::Instant::now();
+    let gate = LAST_RUN.get_or_init(|| {
+        Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(min_secs + 1))
+    });
+    if let Ok(mut last) = gate.lock() {
+        if now.duration_since(*last).as_secs() < min_secs {
+            return;
+        }
+        *last = now;
+    }
+    // Spawn a detached thread to run the refresh without blocking the UI.
+    std::thread::spawn(|| {
+        let _ = StdCommand::new("codex-agentic")
+            .arg("index")
+            .arg("build")
+            .status();
+    });
+}
